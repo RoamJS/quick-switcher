@@ -48,3 +48,13 @@ Stock base for [RoamJS](https://roamjs.com) Roam Research extensions. **Fork thi
 ## License
 
 MIT
+
+# To Do
+
+- Move the management of pages to a popup or dropdown.
+- On the settings page, just list the pages for now; move the full settings experience into a custom popup so it does not get ugly or crowded.
+- Fix load behavior; something currently requires two reloads before the plugin loads.
+- Investigate why pages do not require keyboard shortcuts.
+- Add support for adding many pages more easily.
+- Add a Query Builder query so dynamic pages can be added via Query Builder.
+- Support adding blocks too.
