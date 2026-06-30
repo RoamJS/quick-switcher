@@ -150,6 +150,7 @@ const initializeQuickSwitcher = ({
     }),
   });
   let isDialogOpen = false;
+  let hasRenderedDialog = false;
 
   const persistBookmarks = (): void => {
     void extensionAPI.settings.set(BOOKMARKS_SETTING_KEY, bookmarks);
@@ -157,10 +158,13 @@ const initializeQuickSwitcher = ({
 
   const closeDialog = (): void => {
     isDialogOpen = false;
-    render();
+    if (hasRenderedDialog) {
+      render();
+    }
   };
 
   const render = (): void => {
+    hasRenderedDialog = true;
     ReactDOM.render(
       <QuickSwitcherDialog
         bookmarks={bookmarks}
@@ -229,10 +233,8 @@ const initializeQuickSwitcher = ({
       .catch(() => undefined);
   };
 
-  persistBookmarks();
   document.addEventListener("keydown", onDocumentKeyDown, true);
   registerCommand();
-  render();
 
   return {
     getBookmarks: (): QuickSwitcherBookmark[] => bookmarks,
@@ -240,7 +242,9 @@ const initializeQuickSwitcher = ({
     setBookmarks: (nextBookmarks: QuickSwitcherBookmark[]): void => {
       bookmarks = sanitizeBookmarks({ bookmarks: nextBookmarks });
       persistBookmarks();
-      render();
+      if (hasRenderedDialog) {
+        render();
+      }
     },
     unload: (): void => {
       closeDialog();
