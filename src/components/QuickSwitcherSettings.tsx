@@ -20,7 +20,12 @@ import type {
 import {
   buildRoamPageUrl,
   createBookmarkId,
+  deriveBlockTitle,
+  extractBlockRefUid,
   formatShortcutForDisplay,
+  getBookmarkTargetLabel,
+  getBookmarkTargetType,
+  getBookmarkTargetUid,
   keyboardEventToShortcut,
   moveBookmarkByOffset,
   normalizeShortcut,
@@ -58,6 +63,40 @@ const isPageUrlInput = ({ entry }: { entry: string }): boolean =>
   entry.startsWith("#/") ||
   entry.startsWith("/#/");
 
+const getBlockUidFromInput = ({ value }: { value: string }): string => {
+  const normalizedValue = value.trim();
+  return (
+    extractBlockRefUid({ value: normalizedValue }) ||
+    (isPageUrlInput({ entry: normalizedValue })
+      ? parsePageUidFromUrl({ url: normalizedValue })
+      : normalizedValue) ||
+    ""
+  );
+};
+
+const getBlockByUid = ({
+  blockUid,
+}: {
+  blockUid: string;
+}): { uid: string; text: string } | null => {
+  const block = window.roamAlphaAPI.pull(
+    "[:block/uid :block/string :node/title]",
+    [":block/uid", blockUid],
+  ) as {
+    ":block/uid"?: string;
+    ":node/title"?: string;
+    ":block/string"?: string;
+  } | null;
+  const uid = block?.[":block/uid"] || "";
+  if (!uid || block?.[":node/title"]) {
+    return null;
+  }
+  return {
+    uid,
+    text: block?.[":block/string"] || "",
+  };
+};
+
 export const createQuickSwitcherSettingsComponent = ({
   initialBookmarks,
   initialQuerySource,
@@ -78,6 +117,7 @@ export const createQuickSwitcherSettingsComponent = ({
     );
     const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
     const [pageTitle, setPageTitle] = useState("");
+    const [blockRef, setBlockRef] = useState("");
     const [shortcut, setShortcut] = useState("");
     const [bulkPages, setBulkPages] = useState("");
 
@@ -106,6 +146,7 @@ export const createQuickSwitcherSettingsComponent = ({
 
     const clearForm = (): void => {
       setPageTitle("");
+      setBlockRef("");
       setShortcut("");
     };
 
@@ -145,6 +186,43 @@ export const createQuickSwitcherSettingsComponent = ({
       setShortcut(nextShortcut);
     };
 
+    const getValidatedShortcut = (): string | null | undefined => {
+      const normalizedShortcut = shortcut
+        ? normalizeShortcut({ shortcut })
+        : null;
+      if (shortcut && !normalizedShortcut) {
+        showToast({
+          content: "Capture a valid shortcut or leave it blank",
+          intent: "warning",
+        });
+        return undefined;
+      }
+
+      if (
+        normalizedShortcut &&
+        !shortcutHasModifier({ shortcut: normalizedShortcut })
+      ) {
+        showToast({
+          content: "Shortcut must include at least one modifier key",
+          intent: "warning",
+        });
+        return undefined;
+      }
+
+      const existingShortcut = normalizedShortcut
+        ? bookmarks.find((bookmark) => bookmark.shortcut === normalizedShortcut)
+        : null;
+      if (existingShortcut) {
+        showToast({
+          content: `Shortcut already used by "${existingShortcut.title}"`,
+          intent: "warning",
+        });
+        return undefined;
+      }
+
+      return normalizedShortcut;
+    };
+
     const addBookmark = (): void => {
       const normalizedPageTitle = pageTitle.trim();
       if (!normalizedPageTitle) {
@@ -164,30 +242,10 @@ export const createQuickSwitcherSettingsComponent = ({
         return;
       }
 
-      const normalizedShortcut = shortcut
-        ? normalizeShortcut({ shortcut })
-        : null;
-      if (shortcut && !normalizedShortcut) {
-        showToast({
-          content: "Capture a valid shortcut or leave it blank",
-          intent: "warning",
-        });
-        return;
-      }
-
-      if (
-        normalizedShortcut &&
-        !shortcutHasModifier({ shortcut: normalizedShortcut })
-      ) {
-        showToast({
-          content: "Shortcut must include at least one modifier key",
-          intent: "warning",
-        });
-        return;
-      }
-
       const existingPage = bookmarks.find(
-        (bookmark) => bookmark.pageUid === pageUid,
+        (bookmark) =>
+          getBookmarkTargetType({ bookmark }) === "page" &&
+          getBookmarkTargetUid({ bookmark }) === pageUid,
       );
       if (existingPage) {
         showToast({
@@ -197,14 +255,8 @@ export const createQuickSwitcherSettingsComponent = ({
         return;
       }
 
-      const existingShortcut = normalizedShortcut
-        ? bookmarks.find((bookmark) => bookmark.shortcut === normalizedShortcut)
-        : null;
-      if (existingShortcut) {
-        showToast({
-          content: `Shortcut already used by "${existingShortcut.title}"`,
-          intent: "warning",
-        });
+      const normalizedShortcut = getValidatedShortcut();
+      if (normalizedShortcut === undefined) {
         return;
       }
 
@@ -224,7 +276,9 @@ export const createQuickSwitcherSettingsComponent = ({
         {
           id: createBookmarkId(),
           title: resolvedTitle,
+          targetType: "page",
           pageUid,
+          blockUid: null,
           url,
           shortcut: normalizedShortcut,
         },
@@ -233,7 +287,74 @@ export const createQuickSwitcherSettingsComponent = ({
       setAndPersistBookmarks({ nextBookmarks });
       clearForm();
       showToast({
-        content: "Bookmark added",
+        content: "Page added",
+        intent: "success",
+      });
+    };
+
+    const addBlock = (): void => {
+      const blockUid = getBlockUidFromInput({ value: blockRef });
+      if (!blockUid) {
+        showToast({
+          content: "Paste a Roam block UID or block reference first",
+          intent: "warning",
+        });
+        return;
+      }
+
+      const block = getBlockByUid({ blockUid });
+      if (!block) {
+        showToast({
+          content: "That block does not exist in this graph",
+          intent: "warning",
+        });
+        return;
+      }
+
+      const existingBlock = bookmarks.find(
+        (bookmark) =>
+          getBookmarkTargetType({ bookmark }) === "block" &&
+          getBookmarkTargetUid({ bookmark }) === blockUid,
+      );
+      if (existingBlock) {
+        showToast({
+          content: `"${existingBlock.title}" is already bookmarked`,
+          intent: "warning",
+        });
+        return;
+      }
+
+      const normalizedShortcut = getValidatedShortcut();
+      if (normalizedShortcut === undefined) {
+        return;
+      }
+
+      const url = buildRoamPageUrl({ pageUid: blockUid });
+      if (!url) {
+        showToast({
+          content: "Could not resolve a URL for this block",
+          intent: "danger",
+        });
+        return;
+      }
+
+      const nextBookmarks = [
+        ...bookmarks,
+        {
+          id: createBookmarkId(),
+          title: deriveBlockTitle({ text: block.text }),
+          targetType: "block" as const,
+          pageUid: null,
+          blockUid: block.uid,
+          url,
+          shortcut: normalizedShortcut,
+        },
+      ];
+
+      setAndPersistBookmarks({ nextBookmarks });
+      clearForm();
+      showToast({
+        content: "Block added",
         intent: "success",
       });
     };
@@ -253,7 +374,8 @@ export const createQuickSwitcherSettingsComponent = ({
 
       const existingPageUids = new Set(
         bookmarks
-          .map((bookmark) => bookmark.pageUid)
+          .filter((bookmark) => getBookmarkTargetType({ bookmark }) === "page")
+          .map((bookmark) => getBookmarkTargetUid({ bookmark }))
           .filter((uid): uid is string => Boolean(uid)),
       );
       const nextBookmarks = [...bookmarks];
@@ -281,7 +403,9 @@ export const createQuickSwitcherSettingsComponent = ({
         nextBookmarks.push({
           id: createBookmarkId(),
           title,
+          targetType: "page",
           pageUid,
+          blockUid: null,
           url,
           shortcut: null,
         });
@@ -334,7 +458,7 @@ export const createQuickSwitcherSettingsComponent = ({
             icon="edit"
             intent="primary"
             onClick={(): void => setIsManageDialogOpen(true)}
-            text="Manage Pages"
+            text="Manage Entries"
           />
         </div>
 
@@ -348,6 +472,7 @@ export const createQuickSwitcherSettingsComponent = ({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{bookmark.title}</div>
                 </div>
+                <Tag minimal>{getBookmarkTargetLabel({ bookmark })}</Tag>
                 {bookmark.shortcut ? (
                   <Tag minimal>
                     {formatShortcutForDisplay({
@@ -372,7 +497,7 @@ export const createQuickSwitcherSettingsComponent = ({
           isOpen={isManageDialogOpen}
           onClose={closeManageDialog}
           style={{ maxWidth: "95vw", width: 720 }}
-          title="Manage Quick Switcher Pages"
+          title="Manage Quick Switcher Entries"
         >
           <div className="bp3-dialog-body flex max-h-[72vh] flex-col gap-4 overflow-y-auto">
             <FormGroup
@@ -384,6 +509,19 @@ export const createQuickSwitcherSettingsComponent = ({
                 placeholder="Type a page title"
                 setValue={setPageTitle}
                 value={pageTitle}
+              />
+            </FormGroup>
+
+            <FormGroup
+              helperText="Paste a block UID, block reference, or Roam block URL."
+              label="Block"
+            >
+              <InputGroup
+                onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
+                  setBlockRef(event.target.value)
+                }
+                placeholder="((abc123def)) or abc123def"
+                value={blockRef}
               />
             </FormGroup>
 
@@ -400,11 +538,8 @@ export const createQuickSwitcherSettingsComponent = ({
             </FormGroup>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                intent="primary"
-                onClick={addBookmark}
-                text="Add Bookmark"
-              />
+              <Button intent="primary" onClick={addBookmark} text="Add Page" />
+              <Button onClick={addBlock} text="Add Block" />
               <Button minimal onClick={clearForm} text="Clear" />
             </div>
 
@@ -488,6 +623,7 @@ export const createQuickSwitcherSettingsComponent = ({
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
+                      <Tag minimal>{getBookmarkTargetLabel({ bookmark })}</Tag>
                       {bookmark.shortcut ? (
                         <Tag minimal>
                           {formatShortcutForDisplay({

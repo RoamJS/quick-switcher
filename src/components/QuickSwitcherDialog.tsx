@@ -10,6 +10,7 @@ import type { QuickSwitcherBookmark } from "~/types/quickSwitcher";
 import {
   filterBookmarks,
   formatShortcutForDisplay,
+  getBookmarkTargetLabel,
 } from "~/utils/quickSwitcher";
 
 type QuickSwitcherDialogProps = {
@@ -21,7 +22,7 @@ type QuickSwitcherDialogProps = {
 };
 
 const getResultCountLabel = ({ count }: { count: number }): string =>
-  `${count} ${count === 1 ? "bookmark" : "bookmarks"}`;
+  `${count} ${count === 1 ? "entry" : "entries"}`;
 
 const QuickSwitcherDialog = ({
   isOpen,
@@ -124,7 +125,7 @@ const QuickSwitcherDialog = ({
             setQuery(event.target.value)
           }
           onKeyDown={onInputKeyDown}
-          placeholder="Search bookmarked pages"
+          placeholder="Search saved pages and blocks"
           value={query}
         />
 
@@ -137,14 +138,17 @@ const QuickSwitcherDialog = ({
                   icon="document-open"
                   key={bookmark.id}
                   labelElement={
-                    bookmark.shortcut ? (
-                      <Tag minimal>
-                        {formatShortcutForDisplay({
-                          shortcut: bookmark.shortcut,
-                          isMac,
-                        })}
-                      </Tag>
-                    ) : undefined
+                    <div className="flex items-center gap-1">
+                      <Tag minimal>{getBookmarkTargetLabel({ bookmark })}</Tag>
+                      {bookmark.shortcut ? (
+                        <Tag minimal>
+                          {formatShortcutForDisplay({
+                            shortcut: bookmark.shortcut,
+                            isMac,
+                          })}
+                        </Tag>
+                      ) : null}
+                    </div>
                   }
                   multiline
                   onClick={(): void => onOpenBookmark(bookmark)}
@@ -163,8 +167,8 @@ const QuickSwitcherDialog = ({
           ) : (
             <div className="bp3-text-muted flex h-full min-h-[140px] items-center justify-center text-sm">
               {query.trim()
-                ? "No bookmarked pages match this search."
-                : "No bookmarked pages yet. Add pages in Quick Switcher settings."}
+                ? "No saved entries match this search."
+                : "No saved entries yet. Add pages or blocks in Quick Switcher settings."}
             </div>
           )}
         </div>

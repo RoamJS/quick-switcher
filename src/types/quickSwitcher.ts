@@ -1,8 +1,12 @@
+export type QuickSwitcherTargetType = "page" | "block";
+
 export type QuickSwitcherBookmark = {
   id: string;
   title: string;
   url: string;
+  targetType: QuickSwitcherTargetType;
   pageUid: string | null;
+  blockUid: string | null;
   shortcut: string | null;
   source?: "saved" | "query-builder";
 };

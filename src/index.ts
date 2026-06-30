@@ -31,10 +31,10 @@ export default runExtension(async ({ extensionAPI }) => {
         },
       },
       {
-        id: "bookmarked-pages",
-        name: "Bookmarked Pages",
+        id: "bookmarked-entries",
+        name: "Saved Entries",
         description:
-          "Add Roam pages with optional shortcuts and optional Query Builder pages.",
+          "Add Roam pages or blocks with optional shortcuts and optional Query Builder pages.",
         action: {
           type: "reactComponent",
           component: settingsComponent,
