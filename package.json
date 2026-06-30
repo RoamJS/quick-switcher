@@ -1,7 +1,7 @@
 {
-  "name": "extension-base",
+  "name": "quick-switcher",
   "version": "1.0.0",
-  "description": "Stock RoamJS Roam Research Extension base — fork this repo to start new extensions.",
+  "description": "Jump to saved pages from a searchable switcher and direct keyboard shortcuts.",
   "main": "index.js",
   "scripts": {
     "postinstall": "patch-package",
