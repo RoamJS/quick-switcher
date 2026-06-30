@@ -13,4 +13,5 @@
 - Save frequently used pages and blocks as Quick Switcher entries.
 - Open saved pages and blocks from a focused searchable dialog.
 - Assign direct keyboard shortcuts for one-step switching.
+- Optionally expose saved entries as command palette commands with a custom prefix.
 - Reorder and remove saved entries from extension settings.

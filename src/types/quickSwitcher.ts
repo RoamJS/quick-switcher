@@ -16,6 +16,11 @@ export type QuickSwitcherQuerySource = {
   queryRef: string;
 };
 
+export type QuickSwitcherCommandPaletteSettings = {
+  enabled: boolean;
+  prefix: string;
+};
+
 export type ShortcutKeyboardEvent = {
   key: string;
   ctrlKey: boolean;

@@ -15,6 +15,7 @@ import getPageTitleByPageUid from "roamjs-components/queries/getPageTitleByPageU
 import getPageUidByPageTitle from "roamjs-components/queries/getPageUidByPageTitle";
 import type {
   QuickSwitcherBookmark,
+  QuickSwitcherCommandPaletteSettings,
   QuickSwitcherQuerySource,
 } from "~/types/quickSwitcher";
 import {
@@ -28,6 +29,7 @@ import {
   getBookmarkTargetUid,
   keyboardEventToShortcut,
   moveBookmarkByOffset,
+  normalizeCommandPaletteSettings,
   normalizeShortcut,
   parsePageUidFromUrl,
   shortcutHasModifier,
@@ -35,9 +37,13 @@ import {
 
 type QuickSwitcherSettingsDependencies = {
   initialBookmarks: QuickSwitcherBookmark[];
+  initialCommandPaletteSettings: QuickSwitcherCommandPaletteSettings;
   initialQuerySource: QuickSwitcherQuerySource;
   isMac: boolean;
   onBookmarksChange: (bookmarks: QuickSwitcherBookmark[]) => void;
+  onCommandPaletteSettingsChange: (
+    settings: QuickSwitcherCommandPaletteSettings,
+  ) => void;
   onQuerySourceChange: (querySource: QuickSwitcherQuerySource) => void;
 };
 
@@ -99,14 +105,26 @@ const getBlockByUid = ({
 
 export const createQuickSwitcherSettingsComponent = ({
   initialBookmarks,
+  initialCommandPaletteSettings,
   initialQuerySource,
   isMac,
   onBookmarksChange,
+  onCommandPaletteSettingsChange,
   onQuerySourceChange,
 }: QuickSwitcherSettingsDependencies): React.FC => {
   const QuickSwitcherSettings = (): React.ReactElement => {
     const [bookmarks, setBookmarks] =
       useState<QuickSwitcherBookmark[]>(initialBookmarks);
+    const [savedCommandPaletteSettings, setSavedCommandPaletteSettings] =
+      useState<QuickSwitcherCommandPaletteSettings>(
+        initialCommandPaletteSettings,
+      );
+    const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(
+      initialCommandPaletteSettings.enabled,
+    );
+    const [commandPalettePrefix, setCommandPalettePrefix] = useState(
+      initialCommandPaletteSettings.prefix,
+    );
     const [savedQuerySource, setSavedQuerySource] =
       useState<QuickSwitcherQuerySource>(initialQuerySource);
     const [querySourceEnabled, setQuerySourceEnabled] = useState(
@@ -134,6 +152,9 @@ export const createQuickSwitcherSettingsComponent = ({
     const isQuerySourceDirty =
       querySourceEnabled !== savedQuerySource.enabled ||
       querySourceRef.trim() !== savedQuerySource.queryRef;
+    const isCommandPaletteDirty =
+      commandPaletteEnabled !== savedCommandPaletteSettings.enabled ||
+      commandPalettePrefix !== savedCommandPaletteSettings.prefix;
 
     const setAndPersistBookmarks = ({
       nextBookmarks,
@@ -159,10 +180,16 @@ export const createQuickSwitcherSettingsComponent = ({
       setQuerySourceRef(savedQuerySource.queryRef);
     };
 
+    const resetCommandPaletteSettings = (): void => {
+      setCommandPaletteEnabled(savedCommandPaletteSettings.enabled);
+      setCommandPalettePrefix(savedCommandPaletteSettings.prefix);
+    };
+
     const closeManageDialog = (): void => {
       setIsManageDialogOpen(false);
       clearForm();
       clearBulkPages();
+      resetCommandPaletteSettings();
       resetQuerySource();
     };
 
@@ -451,6 +478,30 @@ export const createQuickSwitcherSettingsComponent = ({
       });
     };
 
+    const saveCommandPaletteSettings = (): void => {
+      if (commandPaletteEnabled && !commandPalettePrefix.trim()) {
+        showToast({
+          content: "Add a command palette prefix first",
+          intent: "warning",
+        });
+        return;
+      }
+
+      const nextCommandPaletteSettings = normalizeCommandPaletteSettings({
+        settings: {
+          enabled: commandPaletteEnabled,
+          prefix: commandPalettePrefix,
+        },
+      });
+      setSavedCommandPaletteSettings(nextCommandPaletteSettings);
+      setCommandPalettePrefix(nextCommandPaletteSettings.prefix);
+      onCommandPaletteSettingsChange(nextCommandPaletteSettings);
+      showToast({
+        content: "Command palette settings saved",
+        intent: "success",
+      });
+    };
+
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-end">
@@ -601,6 +652,42 @@ export const createQuickSwitcherSettingsComponent = ({
                   disabled={!isQuerySourceDirty}
                   minimal
                   onClick={resetQuerySource}
+                  text="Reset"
+                />
+              </div>
+            </div>
+
+            <div className="rounded border border-slate-200 p-3">
+              <Switch
+                checked={commandPaletteEnabled}
+                label="Add saved entries to command palette"
+                onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
+                  setCommandPaletteEnabled(event.target.checked)
+                }
+              />
+              <FormGroup
+                helperText="Saved commands use this prefix plus the entry title."
+                label="Command Palette Prefix"
+              >
+                <InputGroup
+                  onChange={(
+                    event: React.ChangeEvent<HTMLInputElement>,
+                  ): void => setCommandPalettePrefix(event.target.value)}
+                  placeholder="Q S - "
+                  value={commandPalettePrefix}
+                />
+              </FormGroup>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={!isCommandPaletteDirty}
+                  icon="floppy-disk"
+                  onClick={saveCommandPaletteSettings}
+                  text="Save Commands"
+                />
+                <Button
+                  disabled={!isCommandPaletteDirty}
+                  minimal
+                  onClick={resetCommandPaletteSettings}
                   text="Reset"
                 />
               </div>

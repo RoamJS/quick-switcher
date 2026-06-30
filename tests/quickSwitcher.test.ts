@@ -7,12 +7,15 @@ import {
   extractQueryBlockLabel,
   filterBookmarks,
   formatShortcutForDisplay,
+  getCommandPaletteCommandLabel,
   keyboardEventToShortcut,
   moveBookmarkByOffset,
+  normalizeCommandPaletteSettings,
   normalizeQuerySource,
   normalizeShortcut,
   parsePageUidFromUrl,
   parseStoredBookmarks,
+  parseStoredCommandPaletteSettings,
   parseStoredQuerySource,
   shortcutHasModifier,
   toAbsoluteUrl,
@@ -198,6 +201,55 @@ test("derives block titles from the first few words", () => {
     }),
   ).toBe("One two three four...");
   expect(deriveBlockTitle({ text: "   " })).toBe("Untitled block");
+});
+
+test("parses and normalizes command palette settings", () => {
+  expect(
+    parseStoredCommandPaletteSettings({
+      value: {
+        enabled: true,
+        prefix: "QS: ",
+      },
+    }),
+  ).toEqual({
+    enabled: true,
+    prefix: "QS: ",
+  });
+  expect(parseStoredCommandPaletteSettings({ value: "invalid" })).toEqual({
+    enabled: false,
+    prefix: "Q S - ",
+  });
+  expect(
+    normalizeCommandPaletteSettings({
+      settings: {
+        enabled: true,
+        prefix: "",
+      },
+    }),
+  ).toEqual({
+    enabled: true,
+    prefix: "Q S - ",
+  });
+});
+
+test("builds command palette labels from prefix and entry title", () => {
+  expect(
+    getCommandPaletteCommandLabel({
+      bookmark: {
+        id: "block-1",
+        title: "Follow up with team",
+        targetType: "block",
+        pageUid: null,
+        blockUid: "block-1",
+        url: "https://roamresearch.com/#/app/graph/page/block-1",
+        shortcut: null,
+      },
+      settings: {
+        enabled: true,
+        prefix: "QS - ",
+      },
+    }),
+  ).toBe("QS - Follow up with team");
 });
 
 test("parses and normalizes query builder source settings", () => {
