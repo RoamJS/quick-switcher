@@ -137,12 +137,14 @@ const QuickSwitcherDialog = ({
                   icon="document-open"
                   key={bookmark.id}
                   labelElement={
-                    <Tag minimal>
-                      {formatShortcutForDisplay({
-                        shortcut: bookmark.shortcut,
-                        isMac,
-                      })}
-                    </Tag>
+                    bookmark.shortcut ? (
+                      <Tag minimal>
+                        {formatShortcutForDisplay({
+                          shortcut: bookmark.shortcut,
+                          isMac,
+                        })}
+                      </Tag>
+                    ) : undefined
                   }
                   multiline
                   onClick={(): void => onOpenBookmark(bookmark)}

@@ -112,16 +112,21 @@ export const createQuickSwitcherSettingsComponent = ({
         return;
       }
 
-      const normalizedShortcut = normalizeShortcut({ shortcut });
-      if (!normalizedShortcut) {
+      const normalizedShortcut = shortcut
+        ? normalizeShortcut({ shortcut })
+        : null;
+      if (shortcut && !normalizedShortcut) {
         showToast({
-          content: "Capture a shortcut before adding",
+          content: "Capture a valid shortcut or leave it blank",
           intent: "warning",
         });
         return;
       }
 
-      if (!shortcutHasModifier({ shortcut: normalizedShortcut })) {
+      if (
+        normalizedShortcut &&
+        !shortcutHasModifier({ shortcut: normalizedShortcut })
+      ) {
         showToast({
           content: "Shortcut must include at least one modifier key",
           intent: "warning",
@@ -140,9 +145,9 @@ export const createQuickSwitcherSettingsComponent = ({
         return;
       }
 
-      const existingShortcut = bookmarks.find(
-        (bookmark) => bookmark.shortcut === normalizedShortcut,
-      );
+      const existingShortcut = normalizedShortcut
+        ? bookmarks.find((bookmark) => bookmark.shortcut === normalizedShortcut)
+        : null;
       if (existingShortcut) {
         showToast({
           content: `Shortcut already used by "${existingShortcut.title}"`,
@@ -196,12 +201,12 @@ export const createQuickSwitcherSettingsComponent = ({
         </FormGroup>
 
         <FormGroup
-          helperText="Click then press your keys (e.g. Ctrl + Shift + 1)."
+          helperText="Optional. Click then press your keys (e.g. Ctrl + Shift + 1)."
           label="Shortcut"
         >
           <InputGroup
             onKeyDown={onShortcutKeyDown}
-            placeholder="Capture shortcut"
+            placeholder="Capture optional shortcut"
             readOnly
             value={shortcutLabel}
           />
@@ -227,12 +232,14 @@ export const createQuickSwitcherSettingsComponent = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Tag minimal>
-                    {formatShortcutForDisplay({
-                      shortcut: bookmark.shortcut,
-                      isMac,
-                    })}
-                  </Tag>
+                  {bookmark.shortcut ? (
+                    <Tag minimal>
+                      {formatShortcutForDisplay({
+                        shortcut: bookmark.shortcut,
+                        isMac,
+                      })}
+                    </Tag>
+                  ) : null}
                   <Button
                     disabled={index === 0}
                     icon="arrow-up"

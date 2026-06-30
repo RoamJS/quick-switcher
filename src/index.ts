@@ -32,7 +32,7 @@ export default runExtension(async ({ extensionAPI }) => {
         id: "bookmarked-pages",
         name: "Bookmarked Pages",
         description:
-          "Add Roam pages and assign shortcuts. These bookmarks are the only pages searchable in the dialog.",
+          "Add Roam pages with optional shortcuts. These bookmarks are the only pages searchable in the dialog.",
         action: {
           type: "reactComponent",
           component: settingsComponent,

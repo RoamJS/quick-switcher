@@ -392,12 +392,12 @@ const parseStoredBookmark = ({
   const title = typeof value.title === "string" ? value.title.trim() : "";
   const shortcut =
     typeof value.shortcut === "string" ? value.shortcut.trim() : "";
-  if (!url || !title || !shortcut) {
+  if (!url || !title) {
     return null;
   }
 
-  const normalizedShortcut = normalizeShortcut({ shortcut });
-  if (!normalizedShortcut) {
+  const normalizedShortcut = shortcut ? normalizeShortcut({ shortcut }) : null;
+  if (shortcut && !normalizedShortcut) {
     return null;
   }
 

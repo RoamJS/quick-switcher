@@ -79,18 +79,25 @@ const sanitizeBookmarks = ({
   const seenUrls = new Set<string>();
 
   return bookmarks.reduce<QuickSwitcherBookmark[]>((result, bookmark) => {
-    const normalizedShortcut = normalizeShortcut({
-      shortcut: bookmark.shortcut,
-    });
+    const normalizedShortcut = bookmark.shortcut
+      ? normalizeShortcut({
+          shortcut: bookmark.shortcut,
+        })
+      : null;
     const normalizedUrl = toAbsoluteUrl({ url: bookmark.url });
-    if (!normalizedShortcut || !normalizedUrl) {
+    if (!normalizedUrl || (bookmark.shortcut && !normalizedShortcut)) {
       return result;
     }
-    if (seenShortcuts.has(normalizedShortcut) || seenUrls.has(normalizedUrl)) {
+    if (
+      (normalizedShortcut && seenShortcuts.has(normalizedShortcut)) ||
+      seenUrls.has(normalizedUrl)
+    ) {
       return result;
     }
 
-    seenShortcuts.add(normalizedShortcut);
+    if (normalizedShortcut) {
+      seenShortcuts.add(normalizedShortcut);
+    }
     seenUrls.add(normalizedUrl);
 
     result.push({
