@@ -178,9 +178,11 @@ const initializeQuickSwitcher = ({
   };
 
   const onDocumentKeyDown = (event: KeyboardEvent): void => {
-    if (isDialogOpen && event.key === "Escape") {
-      event.preventDefault();
-      closeDialog();
+    if (isDialogOpen) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDialog();
+      }
       return;
     }
 

@@ -33,6 +33,17 @@ test("builds shortcuts from keyboard events", () => {
       },
     }),
   ).toBe("ctrl+alt+k");
+  expect(
+    keyboardEventToShortcut({
+      event: {
+        key: " ",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      },
+    }),
+  ).toBe("ctrl+space");
 });
 
 test("checks whether a shortcut has at least one modifier", () => {
@@ -87,7 +98,7 @@ test("filters bookmarks by title or url", () => {
   ];
 
   expect(filterBookmarks({ bookmarks, query: "project" })).toHaveLength(1);
-  expect(filterBookmarks({ bookmarks, query: "research" })).toHaveLength(1);
+  expect(filterBookmarks({ bookmarks, query: "notes" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "graph/page" })).toHaveLength(2);
 });
 

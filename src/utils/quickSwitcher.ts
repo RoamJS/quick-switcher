@@ -25,14 +25,15 @@ const normalizeModifierToken = ({ token }: { token: string }): string => {
 };
 
 const normalizeKeyToken = ({ token }: { token: string }): string => {
-  const normalizedToken = token.toLowerCase().trim();
+  const lowerToken = token.toLowerCase();
+  if (lowerToken === " " || lowerToken.trim() === "spacebar") {
+    return "space";
+  }
+  const normalizedToken = lowerToken.trim();
   if (!normalizedToken) {
     return "";
   }
-  if (normalizedToken === " ") {
-    return "space";
-  }
-  if (normalizedToken === "spacebar") {
+  if (normalizedToken === "space") {
     return "space";
   }
   if (normalizedToken === "esc") {
