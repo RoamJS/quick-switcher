@@ -5,6 +5,7 @@ import {
   FormGroup,
   InputGroup,
   Tag,
+  TextArea,
 } from "@blueprintjs/core";
 import React, { useMemo, useState } from "react";
 import PageInput from "roamjs-components/components/PageInput";
@@ -19,6 +20,7 @@ import {
   keyboardEventToShortcut,
   moveBookmarkByOffset,
   normalizeShortcut,
+  parsePageUidFromUrl,
   shortcutHasModifier,
 } from "~/utils/quickSwitcher";
 
@@ -45,6 +47,11 @@ const showToast = ({
   });
 };
 
+const isPageUrlInput = ({ entry }: { entry: string }): boolean =>
+  /^https?:\/\//i.test(entry) ||
+  entry.startsWith("#/") ||
+  entry.startsWith("/#/");
+
 export const createQuickSwitcherSettingsComponent = ({
   initialBookmarks,
   isMac,
@@ -56,6 +63,7 @@ export const createQuickSwitcherSettingsComponent = ({
     const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
     const [pageTitle, setPageTitle] = useState("");
     const [shortcut, setShortcut] = useState("");
+    const [bulkPages, setBulkPages] = useState("");
 
     const shortcutLabel = useMemo(
       () =>
@@ -82,9 +90,14 @@ export const createQuickSwitcherSettingsComponent = ({
       setShortcut("");
     };
 
+    const clearBulkPages = (): void => {
+      setBulkPages("");
+    };
+
     const closeManageDialog = (): void => {
       setIsManageDialogOpen(false);
       clearForm();
+      clearBulkPages();
     };
 
     const onShortcutKeyDown = (
@@ -200,6 +213,73 @@ export const createQuickSwitcherSettingsComponent = ({
       });
     };
 
+    const addBulkPages = (): void => {
+      const entries = bulkPages
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      if (!entries.length) {
+        showToast({
+          content: "Add at least one page title or URL",
+          intent: "warning",
+        });
+        return;
+      }
+
+      const existingPageUids = new Set(
+        bookmarks
+          .map((bookmark) => bookmark.pageUid)
+          .filter((uid): uid is string => Boolean(uid)),
+      );
+      const nextBookmarks = [...bookmarks];
+      let addedCount = 0;
+      let skippedCount = 0;
+
+      entries.forEach((entry) => {
+        const pageUid = isPageUrlInput({ entry })
+          ? parsePageUidFromUrl({ url: entry })
+          : getPageUidByPageTitle(entry);
+        const title = pageUid ? getPageTitleByPageUid(pageUid) : "";
+        if (!pageUid || !title || existingPageUids.has(pageUid)) {
+          skippedCount += 1;
+          return;
+        }
+
+        const url = buildRoamPageUrl({ pageUid });
+        if (!url) {
+          skippedCount += 1;
+          return;
+        }
+
+        existingPageUids.add(pageUid);
+        addedCount += 1;
+        nextBookmarks.push({
+          id: createBookmarkId(),
+          title,
+          pageUid,
+          url,
+          shortcut: null,
+        });
+      });
+
+      if (!addedCount) {
+        showToast({
+          content: "No new pages were added",
+          intent: "warning",
+        });
+        return;
+      }
+
+      setAndPersistBookmarks({ nextBookmarks });
+      clearBulkPages();
+      showToast({
+        content: `Added ${addedCount} ${addedCount === 1 ? "page" : "pages"}${
+          skippedCount ? `, skipped ${skippedCount}` : ""
+        }`,
+        intent: "success",
+      });
+    };
+
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-end">
@@ -279,6 +359,32 @@ export const createQuickSwitcherSettingsComponent = ({
                 text="Add Bookmark"
               />
               <Button minimal onClick={clearForm} text="Clear" />
+            </div>
+
+            <FormGroup
+              helperText="One existing page title or Roam page URL per line."
+              label="Bulk Add Pages"
+            >
+              <TextArea
+                fill
+                growVertically
+                onChange={(
+                  event: React.ChangeEvent<HTMLTextAreaElement>,
+                ): void => setBulkPages(event.target.value)}
+                placeholder="Project Home&#10;https://roamresearch.com/#/app/graph/page/abc123"
+                rows={4}
+                value={bulkPages}
+              />
+            </FormGroup>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={!bulkPages.trim()}
+                icon="multi-select"
+                onClick={addBulkPages}
+                text="Add Pages"
+              />
+              <Button minimal onClick={clearBulkPages} text="Clear Bulk" />
             </div>
 
             <div className="flex flex-col gap-2">
