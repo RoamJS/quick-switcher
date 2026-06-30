@@ -1,5 +1,6 @@
 import type {
   QuickSwitcherBookmark,
+  QuickSwitcherCommandPaletteSettings,
   QuickSwitcherQuerySource,
   QuickSwitcherTargetType,
   ShortcutKeyboardEvent,
@@ -18,6 +19,12 @@ const QUERY_BLOCK_REGEX = /^\{\{query block(?::(.+?))?\}\}$/i;
 const DEFAULT_QUERY_SOURCE: QuickSwitcherQuerySource = {
   enabled: false,
   queryRef: "",
+};
+const DEFAULT_COMMAND_PALETTE_PREFIX = "Q S - ";
+
+const DEFAULT_COMMAND_PALETTE_SETTINGS: QuickSwitcherCommandPaletteSettings = {
+  enabled: false,
+  prefix: DEFAULT_COMMAND_PALETTE_PREFIX,
 };
 
 const normalizeModifierToken = ({ token }: { token: string }): string => {
@@ -521,6 +528,44 @@ export const normalizeQuerySource = ({
   enabled: Boolean(querySource.enabled),
   queryRef: querySource.queryRef.trim(),
 });
+
+export const parseStoredCommandPaletteSettings = ({
+  value,
+}: {
+  value: unknown;
+}): QuickSwitcherCommandPaletteSettings => {
+  if (!isRecord(value)) {
+    return DEFAULT_COMMAND_PALETTE_SETTINGS;
+  }
+
+  const prefix =
+    typeof value.prefix === "string" && value.prefix.trim()
+      ? value.prefix
+      : DEFAULT_COMMAND_PALETTE_PREFIX;
+  return {
+    enabled: Boolean(value.enabled),
+    prefix,
+  };
+};
+
+export const normalizeCommandPaletteSettings = ({
+  settings,
+}: {
+  settings: QuickSwitcherCommandPaletteSettings;
+}): QuickSwitcherCommandPaletteSettings => ({
+  enabled: Boolean(settings.enabled),
+  prefix: settings.prefix.trim()
+    ? settings.prefix
+    : DEFAULT_COMMAND_PALETTE_PREFIX,
+});
+
+export const getCommandPaletteCommandLabel = ({
+  bookmark,
+  settings,
+}: {
+  bookmark: QuickSwitcherBookmark;
+  settings: QuickSwitcherCommandPaletteSettings;
+}): string => `${settings.prefix}${bookmark.title}`;
 
 export const extractBlockRefUid = ({
   value,

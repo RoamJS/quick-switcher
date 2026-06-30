@@ -7,6 +7,7 @@ export default runExtension(async ({ extensionAPI }) => {
   const quickSwitcher = initializeQuickSwitcher({ extensionAPI });
   const settingsComponent = createQuickSwitcherSettingsComponent({
     initialBookmarks: quickSwitcher.getBookmarks(),
+    initialCommandPaletteSettings: quickSwitcher.getCommandPaletteSettings(),
     initialQuerySource: quickSwitcher.getQuerySource(),
     isMac: /mac|iphone|ipad|ipod/i.test(
       typeof navigator === "undefined"
@@ -14,6 +15,7 @@ export default runExtension(async ({ extensionAPI }) => {
         : `${navigator.platform} ${navigator.userAgent}`,
     ),
     onBookmarksChange: quickSwitcher.setBookmarks,
+    onCommandPaletteSettingsChange: quickSwitcher.setCommandPaletteSettings,
     onQuerySourceChange: quickSwitcher.setQuerySource,
   });
 

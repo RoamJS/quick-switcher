@@ -8,17 +8,22 @@ import type { Result as QueryBuilderResult } from "roamjs-components/types/query
 import QuickSwitcherDialog from "~/components/QuickSwitcherDialog";
 import type {
   QuickSwitcherBookmark,
+  QuickSwitcherCommandPaletteSettings,
   QuickSwitcherQuerySource,
 } from "~/types/quickSwitcher";
 import {
   buildRoamPageUrl,
   extractBlockRefUid,
   extractQueryBlockLabel,
+  getBookmarkTargetLabel,
   getBookmarkTargetType,
   getBookmarkTargetUid,
+  getCommandPaletteCommandLabel,
+  normalizeCommandPaletteSettings,
   keyboardEventToShortcut,
   normalizeQuerySource,
   normalizeShortcut,
+  parseStoredCommandPaletteSettings,
   parsePageUidFromUrl,
   parseStoredQuerySource,
   parseStoredBookmarks,
@@ -27,6 +32,7 @@ import {
 
 const BOOKMARKS_SETTING_KEY = "quickSwitcherBookmarks";
 const QUERY_SOURCE_SETTING_KEY = "quickSwitcherQuerySource";
+const COMMAND_PALETTE_SETTING_KEY = "quickSwitcherCommandPalette";
 const OPEN_QUICK_SWITCHER_COMMAND = "Quick Switcher: Open";
 
 type ExtensionApi = OnloadArgs["extensionAPI"];
@@ -35,9 +41,13 @@ type ToastIntent = "none" | "primary" | "success" | "warning" | "danger";
 
 export type QuickSwitcherController = {
   getBookmarks: () => QuickSwitcherBookmark[];
+  getCommandPaletteSettings: () => QuickSwitcherCommandPaletteSettings;
   getQuerySource: () => QuickSwitcherQuerySource;
   open: () => void;
   setBookmarks: (bookmarks: QuickSwitcherBookmark[]) => void;
+  setCommandPaletteSettings: (
+    settings: QuickSwitcherCommandPaletteSettings,
+  ) => void;
   setQuerySource: (querySource: QuickSwitcherQuerySource) => void;
   unload: () => void;
 };
@@ -182,6 +192,32 @@ const getBookmarkKey = ({ bookmark }: { bookmark: QuickSwitcherBookmark }) => {
   const targetType = getBookmarkTargetType({ bookmark });
   const targetUid = getBookmarkTargetUid({ bookmark });
   return targetUid ? `${targetType}:${targetUid}` : `url:${bookmark.url}`;
+};
+
+const getUniqueCommandLabel = ({
+  bookmark,
+  settings,
+  usedLabels,
+}: {
+  bookmark: QuickSwitcherBookmark;
+  settings: QuickSwitcherCommandPaletteSettings;
+  usedLabels: Set<string>;
+}): string => {
+  const baseLabel = getCommandPaletteCommandLabel({ bookmark, settings });
+  if (!usedLabels.has(baseLabel)) {
+    return baseLabel;
+  }
+
+  const typedLabel = `${baseLabel} (${getBookmarkTargetLabel({ bookmark })})`;
+  if (!usedLabels.has(typedLabel)) {
+    return typedLabel;
+  }
+
+  let index = 2;
+  while (usedLabels.has(`${typedLabel} ${index}`)) {
+    index += 1;
+  }
+  return `${typedLabel} ${index}`;
 };
 
 const mergeBookmarks = ({
@@ -377,10 +413,16 @@ const initializeQuickSwitcher = ({
       value: extensionAPI.settings.get(BOOKMARKS_SETTING_KEY),
     }),
   });
+  let commandPaletteSettings = parseStoredCommandPaletteSettings({
+    value: extensionAPI.settings.get(COMMAND_PALETTE_SETTING_KEY),
+  });
   let querySource = parseStoredQuerySource({
     value: extensionAPI.settings.get(QUERY_SOURCE_SETTING_KEY),
   });
   let dynamicBookmarks: QuickSwitcherBookmark[] = [];
+  let registeredBookmarkCommandLabels = new Set<string>();
+  let bookmarkCommandSyncQueue = Promise.resolve();
+  let bookmarkCommandSyncId = 0;
   let isDialogOpen = false;
   let hasRenderedDialog = false;
   let isUnloaded = false;
@@ -388,6 +430,13 @@ const initializeQuickSwitcher = ({
 
   const persistBookmarks = (): void => {
     void extensionAPI.settings.set(BOOKMARKS_SETTING_KEY, bookmarks);
+  };
+
+  const persistCommandPaletteSettings = (): void => {
+    void extensionAPI.settings.set(
+      COMMAND_PALETTE_SETTING_KEY,
+      commandPaletteSettings,
+    );
   };
 
   const persistQuerySource = (): void => {
@@ -517,19 +566,97 @@ const initializeQuickSwitcher = ({
       .catch(() => undefined);
   };
 
+  const syncBookmarkCommands = (): void => {
+    const syncId = bookmarkCommandSyncId + 1;
+    bookmarkCommandSyncId = syncId;
+    bookmarkCommandSyncQueue = bookmarkCommandSyncQueue
+      .then(async () => {
+        const labelsToRemove = [...registeredBookmarkCommandLabels];
+        registeredBookmarkCommandLabels = new Set();
+        await Promise.all(
+          labelsToRemove.map((label) =>
+            extensionAPI.ui.commandPalette
+              .removeCommand({ label })
+              .catch(() => undefined),
+          ),
+        );
+
+        if (
+          isUnloaded ||
+          syncId !== bookmarkCommandSyncId ||
+          !commandPaletteSettings.enabled
+        ) {
+          return;
+        }
+
+        const usedLabels = new Set<string>([OPEN_QUICK_SWITCHER_COMMAND]);
+        const nextLabels = bookmarks.map((bookmark) => {
+          const label = getUniqueCommandLabel({
+            bookmark,
+            settings: commandPaletteSettings,
+            usedLabels,
+          });
+          usedLabels.add(label);
+          return { bookmark, label };
+        });
+
+        await Promise.all(
+          nextLabels.map(({ bookmark, label }) =>
+            extensionAPI.ui.commandPalette
+              .addCommand({
+                label,
+                callback: () => {
+                  void openBookmark({ bookmark });
+                },
+              })
+              .catch(() => undefined),
+          ),
+        );
+
+        if (isUnloaded || syncId !== bookmarkCommandSyncId) {
+          await Promise.all(
+            nextLabels.map(({ label }) =>
+              extensionAPI.ui.commandPalette
+                .removeCommand({ label })
+                .catch(() => undefined),
+            ),
+          );
+          return;
+        }
+
+        registeredBookmarkCommandLabels = new Set(
+          nextLabels.map(({ label }) => label),
+        );
+      })
+      .catch(() => undefined);
+  };
+
   document.addEventListener("keydown", onDocumentKeyDown, true);
   registerCommand();
+  syncBookmarkCommands();
 
   return {
     getBookmarks: (): QuickSwitcherBookmark[] => bookmarks,
+    getCommandPaletteSettings: (): QuickSwitcherCommandPaletteSettings =>
+      commandPaletteSettings,
     getQuerySource: (): QuickSwitcherQuerySource => querySource,
     open: openDialog,
     setBookmarks: (nextBookmarks: QuickSwitcherBookmark[]): void => {
       bookmarks = sanitizeBookmarks({ bookmarks: nextBookmarks });
       persistBookmarks();
+      syncBookmarkCommands();
       if (hasRenderedDialog) {
         render();
       }
+    },
+    setCommandPaletteSettings: (
+      nextCommandPaletteSettings: QuickSwitcherCommandPaletteSettings,
+    ): void => {
+      commandPaletteSettings = normalizeCommandPaletteSettings({
+        settings: nextCommandPaletteSettings,
+      });
+      persistCommandPaletteSettings();
+      syncBookmarkCommands();
     },
     setQuerySource: (nextQuerySource: QuickSwitcherQuerySource): void => {
       querySource = normalizeQuerySource({ querySource: nextQuerySource });
@@ -539,8 +666,10 @@ const initializeQuickSwitcher = ({
     unload: (): void => {
       isUnloaded = true;
       refreshQuerySourceId += 1;
+      bookmarkCommandSyncId += 1;
       closeDialog();
       document.removeEventListener("keydown", onDocumentKeyDown, true);
+      syncBookmarkCommands();
       unregisterCommand();
       ReactDOM.unmountComponentAtNode(root);
       root.remove();
