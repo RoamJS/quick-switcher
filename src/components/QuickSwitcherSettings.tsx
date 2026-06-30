@@ -1,4 +1,11 @@
-import { Button, Card, FormGroup, InputGroup, Tag } from "@blueprintjs/core";
+import {
+  Button,
+  Card,
+  Dialog,
+  FormGroup,
+  InputGroup,
+  Tag,
+} from "@blueprintjs/core";
 import React, { useMemo, useState } from "react";
 import PageInput from "roamjs-components/components/PageInput";
 import { render as renderToast } from "roamjs-components/components/Toast";
@@ -46,6 +53,7 @@ export const createQuickSwitcherSettingsComponent = ({
   const QuickSwitcherSettings = (): React.ReactElement => {
     const [bookmarks, setBookmarks] =
       useState<QuickSwitcherBookmark[]>(initialBookmarks);
+    const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
     const [pageTitle, setPageTitle] = useState("");
     const [shortcut, setShortcut] = useState("");
 
@@ -74,10 +82,16 @@ export const createQuickSwitcherSettingsComponent = ({
       setShortcut("");
     };
 
+    const closeManageDialog = (): void => {
+      setIsManageDialogOpen(false);
+      clearForm();
+    };
+
     const onShortcutKeyDown = (
       event: React.KeyboardEvent<HTMLInputElement>,
     ): void => {
       event.preventDefault();
+      event.stopPropagation();
       if (
         event.key === "Backspace" ||
         event.key === "Delete" ||
@@ -187,104 +201,35 @@ export const createQuickSwitcherSettingsComponent = ({
     };
 
     return (
-      <div className="flex flex-col gap-4">
-        <FormGroup
-          helperText="Start typing to pick from existing Roam pages."
-          label="Page"
-        >
-          <PageInput
-            id="quick-switcher-settings-page-input"
-            placeholder="Type a page title"
-            setValue={setPageTitle}
-            value={pageTitle}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-end">
+          <Button
+            icon="edit"
+            intent="primary"
+            onClick={(): void => setIsManageDialogOpen(true)}
+            text="Manage Pages"
           />
-        </FormGroup>
-
-        <FormGroup
-          helperText="Optional. Click then press your keys (e.g. Ctrl + Shift + 1)."
-          label="Shortcut"
-        >
-          <InputGroup
-            onKeyDown={onShortcutKeyDown}
-            placeholder="Capture optional shortcut"
-            readOnly
-            value={shortcutLabel}
-          />
-        </FormGroup>
-
-        <div className="flex flex-wrap gap-2">
-          <Button intent="primary" onClick={addBookmark} text="Add Bookmark" />
-          <Button minimal onClick={clearForm} text="Clear" />
         </div>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded border border-slate-200 p-2">
           {bookmarks.length ? (
-            bookmarks.map((bookmark, index) => (
-              <Card
-                className="flex items-start justify-between gap-2"
-                elevation={0}
+            bookmarks.map((bookmark) => (
+              <div
+                className="flex min-h-[32px] items-center justify-between gap-2 border-b border-slate-100 py-1 last:border-b-0"
                 key={bookmark.id}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{bookmark.title}</div>
-                  <div className="truncate text-xs text-slate-500">
-                    {bookmark.url}
-                  </div>
+                  <div className="truncate text-sm">{bookmark.title}</div>
                 </div>
-                <div className="flex items-center gap-1">
-                  {bookmark.shortcut ? (
-                    <Tag minimal>
-                      {formatShortcutForDisplay({
-                        shortcut: bookmark.shortcut,
-                        isMac,
-                      })}
-                    </Tag>
-                  ) : null}
-                  <Button
-                    disabled={index === 0}
-                    icon="arrow-up"
-                    minimal
-                    onClick={(): void =>
-                      setAndPersistBookmarks({
-                        nextBookmarks: moveBookmarkByOffset({
-                          bookmarks,
-                          index,
-                          offset: -1,
-                        }),
-                      })
-                    }
-                    small
-                  />
-                  <Button
-                    disabled={index >= bookmarks.length - 1}
-                    icon="arrow-down"
-                    minimal
-                    onClick={(): void =>
-                      setAndPersistBookmarks({
-                        nextBookmarks: moveBookmarkByOffset({
-                          bookmarks,
-                          index,
-                          offset: 1,
-                        }),
-                      })
-                    }
-                    small
-                  />
-                  <Button
-                    icon="trash"
-                    intent="danger"
-                    minimal
-                    onClick={(): void =>
-                      setAndPersistBookmarks({
-                        nextBookmarks: bookmarks.filter(
-                          (b) => b.id !== bookmark.id,
-                        ),
-                      })
-                    }
-                    small
-                  />
-                </div>
-              </Card>
+                {bookmark.shortcut ? (
+                  <Tag minimal>
+                    {formatShortcutForDisplay({
+                      shortcut: bookmark.shortcut,
+                      isMac,
+                    })}
+                  </Tag>
+                ) : null}
+              </div>
             ))
           ) : (
             <div className="bp3-text-muted text-sm">
@@ -292,6 +237,129 @@ export const createQuickSwitcherSettingsComponent = ({
             </div>
           )}
         </div>
+
+        <Dialog
+          canEscapeKeyClose
+          canOutsideClickClose
+          icon="edit"
+          isOpen={isManageDialogOpen}
+          onClose={closeManageDialog}
+          style={{ maxWidth: "95vw", width: 720 }}
+          title="Manage Quick Switcher Pages"
+        >
+          <div className="bp3-dialog-body flex max-h-[72vh] flex-col gap-4 overflow-y-auto">
+            <FormGroup
+              helperText="Start typing to pick from existing Roam pages."
+              label="Page"
+            >
+              <PageInput
+                id="quick-switcher-settings-page-input"
+                placeholder="Type a page title"
+                setValue={setPageTitle}
+                value={pageTitle}
+              />
+            </FormGroup>
+
+            <FormGroup
+              helperText="Optional. Click then press your keys (e.g. Ctrl + Shift + 1)."
+              label="Shortcut"
+            >
+              <InputGroup
+                onKeyDown={onShortcutKeyDown}
+                placeholder="Capture optional shortcut"
+                readOnly
+                value={shortcutLabel}
+              />
+            </FormGroup>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                intent="primary"
+                onClick={addBookmark}
+                text="Add Bookmark"
+              />
+              <Button minimal onClick={clearForm} text="Clear" />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {bookmarks.length ? (
+                bookmarks.map((bookmark, index) => (
+                  <Card
+                    className="flex items-start justify-between gap-2"
+                    elevation={0}
+                    key={bookmark.id}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">
+                        {bookmark.title}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {bookmark.url}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {bookmark.shortcut ? (
+                        <Tag minimal>
+                          {formatShortcutForDisplay({
+                            shortcut: bookmark.shortcut,
+                            isMac,
+                          })}
+                        </Tag>
+                      ) : null}
+                      <Button
+                        disabled={index === 0}
+                        icon="arrow-up"
+                        minimal
+                        onClick={(): void =>
+                          setAndPersistBookmarks({
+                            nextBookmarks: moveBookmarkByOffset({
+                              bookmarks,
+                              index,
+                              offset: -1,
+                            }),
+                          })
+                        }
+                        small
+                      />
+                      <Button
+                        disabled={index >= bookmarks.length - 1}
+                        icon="arrow-down"
+                        minimal
+                        onClick={(): void =>
+                          setAndPersistBookmarks({
+                            nextBookmarks: moveBookmarkByOffset({
+                              bookmarks,
+                              index,
+                              offset: 1,
+                            }),
+                          })
+                        }
+                        small
+                      />
+                      <Button
+                        icon="trash"
+                        intent="danger"
+                        minimal
+                        onClick={(): void =>
+                          setAndPersistBookmarks({
+                            nextBookmarks: bookmarks.filter(
+                              (b) => b.id !== bookmark.id,
+                            ),
+                          })
+                        }
+                        small
+                      />
+                    </div>
+                  </Card>
+                ))
+              ) : (
+                <div className="bp3-text-muted text-sm">
+                  No bookmarks configured yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </Dialog>
       </div>
     );
   };
