@@ -2,13 +2,17 @@ import { expect, test } from "@playwright/test";
 import type { QuickSwitcherBookmark } from "../src/types/quickSwitcher";
 import {
   buildRoamPageUrl,
+  extractBlockRefUid,
+  extractQueryBlockLabel,
   filterBookmarks,
   formatShortcutForDisplay,
   keyboardEventToShortcut,
   moveBookmarkByOffset,
+  normalizeQuerySource,
   normalizeShortcut,
   parsePageUidFromUrl,
   parseStoredBookmarks,
+  parseStoredQuerySource,
   shortcutHasModifier,
   toAbsoluteUrl,
 } from "../src/utils/quickSwitcher";
@@ -163,6 +167,50 @@ test("parses and sanitizes stored bookmarks", () => {
   expect(parsed).toHaveLength(2);
   expect(parsed[0].shortcut).toBe("ctrl+1");
   expect(parsed[1].shortcut).toBeNull();
+});
+
+test("parses and normalizes query builder source settings", () => {
+  expect(
+    parseStoredQuerySource({
+      value: {
+        enabled: true,
+        queryRef: "  queries/Active Projects  ",
+      },
+    }),
+  ).toEqual({
+    enabled: true,
+    queryRef: "queries/Active Projects",
+  });
+  expect(parseStoredQuerySource({ value: "invalid" })).toEqual({
+    enabled: false,
+    queryRef: "",
+  });
+  expect(
+    normalizeQuerySource({
+      querySource: {
+        enabled: true,
+        queryRef: "  ((abc123def))  ",
+      },
+    }),
+  ).toEqual({
+    enabled: true,
+    queryRef: "((abc123def))",
+  });
+});
+
+test("extracts block uids from roam block refs", () => {
+  expect(extractBlockRefUid({ value: "Run ((abc123_DEF))" })).toBe(
+    "abc123_DEF",
+  );
+  expect(extractBlockRefUid({ value: "not a block ref" })).toBeNull();
+});
+
+test("extracts query builder labels from query block refs", () => {
+  expect(
+    extractQueryBlockLabel({ value: "{{query block:Active Projects}}" }),
+  ).toBe("Active Projects");
+  expect(extractQueryBlockLabel({ value: "{{query block}}" })).toBeNull();
+  expect(extractQueryBlockLabel({ value: "Active Projects" })).toBeNull();
 });
 
 test("resolves relative urls to absolute urls", () => {

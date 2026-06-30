@@ -1,5 +1,6 @@
 import type {
   QuickSwitcherBookmark,
+  QuickSwitcherQuerySource,
   ShortcutKeyboardEvent,
 } from "~/types/quickSwitcher";
 
@@ -9,6 +10,14 @@ const MODIFIER_EVENT_KEYS = new Set(["control", "meta", "alt", "shift"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+const BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]+)\)\)/;
+const QUERY_BLOCK_REGEX = /^\{\{query block(?::(.+?))?\}\}$/i;
+
+const DEFAULT_QUERY_SOURCE: QuickSwitcherQuerySource = {
+  enabled: false,
+  queryRef: "",
+};
 
 const normalizeModifierToken = ({ token }: { token: string }): string => {
   const normalizedToken = token.toLowerCase().trim();
@@ -430,6 +439,50 @@ export const parseStoredBookmarks = ({
   return value
     .map((bookmark, index) => parseStoredBookmark({ value: bookmark, index }))
     .filter((bookmark): bookmark is QuickSwitcherBookmark => Boolean(bookmark));
+};
+
+export const parseStoredQuerySource = ({
+  value,
+}: {
+  value: unknown;
+}): QuickSwitcherQuerySource => {
+  if (!isRecord(value)) {
+    return DEFAULT_QUERY_SOURCE;
+  }
+
+  const queryRef = typeof value.queryRef === "string" ? value.queryRef : "";
+  return {
+    enabled: Boolean(value.enabled),
+    queryRef: queryRef.trim(),
+  };
+};
+
+export const normalizeQuerySource = ({
+  querySource,
+}: {
+  querySource: QuickSwitcherQuerySource;
+}): QuickSwitcherQuerySource => ({
+  enabled: Boolean(querySource.enabled),
+  queryRef: querySource.queryRef.trim(),
+});
+
+export const extractBlockRefUid = ({
+  value,
+}: {
+  value: string;
+}): string | null => {
+  const match = value.match(BLOCK_REF_REGEX);
+  return match?.[1] || null;
+};
+
+export const extractQueryBlockLabel = ({
+  value,
+}: {
+  value: string;
+}): string | null => {
+  const match = value.trim().match(QUERY_BLOCK_REGEX);
+  const label = match?.[1]?.trim();
+  return label || null;
 };
 
 export const createBookmarkId = (): string =>

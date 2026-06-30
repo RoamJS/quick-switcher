@@ -7,12 +7,14 @@ export default runExtension(async ({ extensionAPI }) => {
   const quickSwitcher = initializeQuickSwitcher({ extensionAPI });
   const settingsComponent = createQuickSwitcherSettingsComponent({
     initialBookmarks: quickSwitcher.getBookmarks(),
+    initialQuerySource: quickSwitcher.getQuerySource(),
     isMac: /mac|iphone|ipad|ipod/i.test(
       typeof navigator === "undefined"
         ? ""
         : `${navigator.platform} ${navigator.userAgent}`,
     ),
     onBookmarksChange: quickSwitcher.setBookmarks,
+    onQuerySourceChange: quickSwitcher.setQuerySource,
   });
 
   extensionAPI.settings.panel.create({
@@ -32,7 +34,7 @@ export default runExtension(async ({ extensionAPI }) => {
         id: "bookmarked-pages",
         name: "Bookmarked Pages",
         description:
-          "Add Roam pages with optional shortcuts. These bookmarks are the only pages searchable in the dialog.",
+          "Add Roam pages with optional shortcuts and optional Query Builder pages.",
         action: {
           type: "reactComponent",
           component: settingsComponent,

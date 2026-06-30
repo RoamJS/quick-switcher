@@ -4,6 +4,7 @@ import {
   Dialog,
   FormGroup,
   InputGroup,
+  Switch,
   Tag,
   TextArea,
 } from "@blueprintjs/core";
@@ -12,7 +13,10 @@ import PageInput from "roamjs-components/components/PageInput";
 import { render as renderToast } from "roamjs-components/components/Toast";
 import getPageTitleByPageUid from "roamjs-components/queries/getPageTitleByPageUid";
 import getPageUidByPageTitle from "roamjs-components/queries/getPageUidByPageTitle";
-import type { QuickSwitcherBookmark } from "~/types/quickSwitcher";
+import type {
+  QuickSwitcherBookmark,
+  QuickSwitcherQuerySource,
+} from "~/types/quickSwitcher";
 import {
   buildRoamPageUrl,
   createBookmarkId,
@@ -26,8 +30,10 @@ import {
 
 type QuickSwitcherSettingsDependencies = {
   initialBookmarks: QuickSwitcherBookmark[];
+  initialQuerySource: QuickSwitcherQuerySource;
   isMac: boolean;
   onBookmarksChange: (bookmarks: QuickSwitcherBookmark[]) => void;
+  onQuerySourceChange: (querySource: QuickSwitcherQuerySource) => void;
 };
 
 type ToastIntent = "none" | "primary" | "success" | "warning" | "danger";
@@ -54,12 +60,22 @@ const isPageUrlInput = ({ entry }: { entry: string }): boolean =>
 
 export const createQuickSwitcherSettingsComponent = ({
   initialBookmarks,
+  initialQuerySource,
   isMac,
   onBookmarksChange,
+  onQuerySourceChange,
 }: QuickSwitcherSettingsDependencies): React.FC => {
   const QuickSwitcherSettings = (): React.ReactElement => {
     const [bookmarks, setBookmarks] =
       useState<QuickSwitcherBookmark[]>(initialBookmarks);
+    const [savedQuerySource, setSavedQuerySource] =
+      useState<QuickSwitcherQuerySource>(initialQuerySource);
+    const [querySourceEnabled, setQuerySourceEnabled] = useState(
+      initialQuerySource.enabled,
+    );
+    const [querySourceRef, setQuerySourceRef] = useState(
+      initialQuerySource.queryRef,
+    );
     const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
     const [pageTitle, setPageTitle] = useState("");
     const [shortcut, setShortcut] = useState("");
@@ -75,6 +91,9 @@ export const createQuickSwitcherSettingsComponent = ({
           : "",
       [isMac, shortcut],
     );
+    const isQuerySourceDirty =
+      querySourceEnabled !== savedQuerySource.enabled ||
+      querySourceRef.trim() !== savedQuerySource.queryRef;
 
     const setAndPersistBookmarks = ({
       nextBookmarks,
@@ -94,10 +113,16 @@ export const createQuickSwitcherSettingsComponent = ({
       setBulkPages("");
     };
 
+    const resetQuerySource = (): void => {
+      setQuerySourceEnabled(savedQuerySource.enabled);
+      setQuerySourceRef(savedQuerySource.queryRef);
+    };
+
     const closeManageDialog = (): void => {
       setIsManageDialogOpen(false);
       clearForm();
       clearBulkPages();
+      resetQuerySource();
     };
 
     const onShortcutKeyDown = (
@@ -280,6 +305,28 @@ export const createQuickSwitcherSettingsComponent = ({
       });
     };
 
+    const saveQuerySource = (): void => {
+      const normalizedQueryRef = querySourceRef.trim();
+      if (querySourceEnabled && !normalizedQueryRef) {
+        showToast({
+          content: "Add a Query Builder query reference first",
+          intent: "warning",
+        });
+        return;
+      }
+
+      const nextQuerySource = {
+        enabled: querySourceEnabled,
+        queryRef: normalizedQueryRef,
+      };
+      setSavedQuerySource(nextQuerySource);
+      onQuerySourceChange(nextQuerySource);
+      showToast({
+        content: "Query Builder source saved",
+        intent: "success",
+      });
+    };
+
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-end">
@@ -385,6 +432,43 @@ export const createQuickSwitcherSettingsComponent = ({
                 text="Add Pages"
               />
               <Button minimal onClick={clearBulkPages} text="Clear Bulk" />
+            </div>
+
+            <div className="rounded border border-slate-200 p-3">
+              <Switch
+                checked={querySourceEnabled}
+                label="Include Query Builder pages"
+                onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
+                  setQuerySourceEnabled(event.target.checked)
+                }
+              />
+              <FormGroup
+                helperText="Use a query page title, query block label, block UID, or block reference."
+                label="Query Builder Source"
+              >
+                <InputGroup
+                  disabled={!querySourceEnabled}
+                  onChange={(
+                    event: React.ChangeEvent<HTMLInputElement>,
+                  ): void => setQuerySourceRef(event.target.value)}
+                  placeholder="Active Projects, queries/Active Projects, or ((abc123def))"
+                  value={querySourceRef}
+                />
+              </FormGroup>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={!isQuerySourceDirty}
+                  icon="floppy-disk"
+                  onClick={saveQuerySource}
+                  text="Save Source"
+                />
+                <Button
+                  disabled={!isQuerySourceDirty}
+                  minimal
+                  onClick={resetQuerySource}
+                  text="Reset"
+                />
+              </div>
             </div>
 
             <div className="flex flex-col gap-2">
