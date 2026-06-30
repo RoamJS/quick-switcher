@@ -1,6 +1,7 @@
 import type {
   QuickSwitcherBookmark,
   QuickSwitcherQuerySource,
+  QuickSwitcherTargetType,
   ShortcutKeyboardEvent,
 } from "~/types/quickSwitcher";
 
@@ -340,6 +341,50 @@ export const derivePageTitleFromUrl = ({ url }: { url: string }): string => {
   return getLastSegmentFromPath({ path: parsedUrl.pathname });
 };
 
+export const getBookmarkTargetType = ({
+  bookmark,
+}: {
+  bookmark: QuickSwitcherBookmark;
+}): QuickSwitcherTargetType =>
+  bookmark.targetType === "block" || bookmark.blockUid ? "block" : "page";
+
+export const getBookmarkTargetUid = ({
+  bookmark,
+}: {
+  bookmark: QuickSwitcherBookmark;
+}): string | null => {
+  const targetType = getBookmarkTargetType({ bookmark });
+  if (targetType === "block") {
+    return bookmark.blockUid || parsePageUidFromUrl({ url: bookmark.url });
+  }
+  return bookmark.pageUid || parsePageUidFromUrl({ url: bookmark.url });
+};
+
+export const getBookmarkTargetLabel = ({
+  bookmark,
+}: {
+  bookmark: QuickSwitcherBookmark;
+}): string =>
+  getBookmarkTargetType({ bookmark }) === "block" ? "Block" : "Page";
+
+export const deriveBlockTitle = ({
+  text,
+  maxWords = 8,
+}: {
+  text: string;
+  maxWords?: number;
+}): string => {
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  if (!normalizedText) {
+    return "Untitled block";
+  }
+  const words = normalizedText.split(" ");
+  if (words.length <= maxWords) {
+    return normalizedText;
+  }
+  return `${words.slice(0, maxWords).join(" ")}...`;
+};
+
 export const filterBookmarks = ({
   bookmarks,
   query,
@@ -410,10 +455,19 @@ const parseStoredBookmark = ({
     return null;
   }
 
-  const pageUid =
-    typeof value.pageUid === "string"
-      ? value.pageUid
-      : parsePageUidFromUrl({ url });
+  const pageUid = typeof value.pageUid === "string" ? value.pageUid.trim() : "";
+  const blockUid =
+    typeof value.blockUid === "string" ? value.blockUid.trim() : "";
+  const parsedUrlUid = parsePageUidFromUrl({ url });
+  const targetType =
+    value.targetType === "block" || blockUid ? "block" : "page";
+  const resolvedPageUid =
+    targetType === "page" ? pageUid || parsedUrlUid : pageUid;
+  const resolvedBlockUid =
+    targetType === "block" ? blockUid || parsedUrlUid || pageUid : blockUid;
+  if (targetType === "block" && !resolvedBlockUid) {
+    return null;
+  }
   const id =
     typeof value.id === "string" && value.id.trim()
       ? value.id
@@ -423,7 +477,9 @@ const parseStoredBookmark = ({
     id,
     title,
     url,
-    pageUid: pageUid || null,
+    targetType,
+    pageUid: resolvedPageUid || null,
+    blockUid: resolvedBlockUid || null,
     shortcut: normalizedShortcut,
   };
 };

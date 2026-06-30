@@ -14,6 +14,8 @@ import {
   buildRoamPageUrl,
   extractBlockRefUid,
   extractQueryBlockLabel,
+  getBookmarkTargetType,
+  getBookmarkTargetUid,
   keyboardEventToShortcut,
   normalizeQuerySource,
   normalizeShortcut,
@@ -90,7 +92,7 @@ const sanitizeBookmarks = ({
   bookmarks: QuickSwitcherBookmark[];
 }): QuickSwitcherBookmark[] => {
   const seenShortcuts = new Set<string>();
-  const seenUrls = new Set<string>();
+  const seenTargets = new Set<string>();
 
   return bookmarks.reduce<QuickSwitcherBookmark[]>((result, bookmark) => {
     const normalizedShortcut = bookmark.shortcut
@@ -102,9 +104,28 @@ const sanitizeBookmarks = ({
     if (!normalizedUrl || (bookmark.shortcut && !normalizedShortcut)) {
       return result;
     }
+    const targetType = getBookmarkTargetType({ bookmark });
+    const parsedUrlUid = parsePageUidFromUrl({ url: normalizedUrl });
+    const pageUid =
+      targetType === "page"
+        ? bookmark.pageUid || parsedUrlUid
+        : bookmark.pageUid || null;
+    const blockUid =
+      targetType === "block"
+        ? bookmark.blockUid || parsedUrlUid
+        : bookmark.blockUid || null;
+    if (targetType === "block" && !blockUid) {
+      return result;
+    }
+    const targetKey =
+      targetType === "block" && blockUid
+        ? `block:${blockUid}`
+        : pageUid
+          ? `page:${pageUid}`
+          : `url:${normalizedUrl}`;
     if (
       (normalizedShortcut && seenShortcuts.has(normalizedShortcut)) ||
-      seenUrls.has(normalizedUrl)
+      seenTargets.has(targetKey)
     ) {
       return result;
     }
@@ -112,13 +133,15 @@ const sanitizeBookmarks = ({
     if (normalizedShortcut) {
       seenShortcuts.add(normalizedShortcut);
     }
-    seenUrls.add(normalizedUrl);
+    seenTargets.add(targetKey);
 
     result.push({
       ...bookmark,
       url: normalizedUrl,
+      targetType,
       shortcut: normalizedShortcut,
-      pageUid: bookmark.pageUid || parsePageUidFromUrl({ url: normalizedUrl }),
+      pageUid,
+      blockUid,
     });
     return result;
   }, []);
@@ -129,12 +152,18 @@ const openBookmark = async ({
 }: {
   bookmark: QuickSwitcherBookmark;
 }): Promise<boolean> => {
-  const pageUid =
-    bookmark.pageUid || parsePageUidFromUrl({ url: bookmark.url });
+  const targetType = getBookmarkTargetType({ bookmark });
+  const targetUid = getBookmarkTargetUid({ bookmark });
   try {
-    if (pageUid) {
+    if (targetType === "block" && targetUid) {
+      await window.roamAlphaAPI.ui.mainWindow.openBlock({
+        block: { uid: targetUid },
+      });
+      return true;
+    }
+    if (targetUid) {
       await window.roamAlphaAPI.ui.mainWindow.openPage({
-        page: { uid: pageUid },
+        page: { uid: targetUid },
       });
       return true;
     }
@@ -149,8 +178,11 @@ const openBookmark = async ({
   }
 };
 
-const getBookmarkKey = ({ bookmark }: { bookmark: QuickSwitcherBookmark }) =>
-  bookmark.pageUid ? `page:${bookmark.pageUid}` : `url:${bookmark.url}`;
+const getBookmarkKey = ({ bookmark }: { bookmark: QuickSwitcherBookmark }) => {
+  const targetType = getBookmarkTargetType({ bookmark });
+  const targetUid = getBookmarkTargetUid({ bookmark });
+  return targetUid ? `${targetType}:${targetUid}` : `url:${bookmark.url}`;
+};
 
 const mergeBookmarks = ({
   savedBookmarks,
@@ -320,7 +352,9 @@ const resolveQueryBuilderPageBookmarks = async ({
     bookmarks.push({
       id: `query-builder-${pageUid}`,
       title,
+      targetType: "page",
       pageUid,
+      blockUid: null,
       url,
       shortcut: null,
       source: "query-builder",

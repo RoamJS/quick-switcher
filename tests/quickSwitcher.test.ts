@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { QuickSwitcherBookmark } from "../src/types/quickSwitcher";
 import {
   buildRoamPageUrl,
+  deriveBlockTitle,
   extractBlockRefUid,
   extractQueryBlockLabel,
   filterBookmarks,
@@ -89,14 +90,18 @@ test("filters bookmarks by title or url", () => {
       id: "1",
       title: "Project Alpha",
       url: "https://roamresearch.com/#/app/graph/page/alpha",
+      targetType: "page",
       pageUid: "alpha",
+      blockUid: null,
       shortcut: "ctrl+1",
     },
     {
       id: "2",
       title: "Research Notes",
       url: "https://roamresearch.com/#/app/graph/page/research",
+      targetType: "page",
       pageUid: "research",
+      blockUid: null,
       shortcut: "ctrl+2",
     },
   ];
@@ -112,21 +117,27 @@ test("moves bookmarks while preserving relative order", () => {
       id: "1",
       title: "One",
       url: "https://roamresearch.com/#/app/graph/page/one",
+      targetType: "page",
       pageUid: "one",
+      blockUid: null,
       shortcut: "ctrl+1",
     },
     {
       id: "2",
       title: "Two",
       url: "https://roamresearch.com/#/app/graph/page/two",
+      targetType: "page",
       pageUid: "two",
+      blockUid: null,
       shortcut: "ctrl+2",
     },
     {
       id: "3",
       title: "Three",
       url: "https://roamresearch.com/#/app/graph/page/three",
+      targetType: "page",
       pageUid: "three",
+      blockUid: null,
       shortcut: "ctrl+3",
     },
   ];
@@ -151,12 +162,19 @@ test("parses and sanitizes stored bookmarks", () => {
       },
       {
         id: "id-3",
+        title: "A saved block entry with a title",
+        targetType: "block",
+        blockUid: "block-uid",
+        url: "https://roamresearch.com/#/app/graph/page/block-uid",
+      },
+      {
+        id: "id-4",
         title: "Invalid Shortcut",
         url: "https://roamresearch.com/#/app/graph/page/invalid-shortcut",
         shortcut: "Ctrl +",
       },
       {
-        id: "id-4",
+        id: "id-5",
         title: "Invalid",
         url: "",
         shortcut: "Ctrl + 2",
@@ -164,9 +182,22 @@ test("parses and sanitizes stored bookmarks", () => {
     ],
   });
 
-  expect(parsed).toHaveLength(2);
+  expect(parsed).toHaveLength(3);
+  expect(parsed[0].targetType).toBe("page");
   expect(parsed[0].shortcut).toBe("ctrl+1");
   expect(parsed[1].shortcut).toBeNull();
+  expect(parsed[2].targetType).toBe("block");
+  expect(parsed[2].blockUid).toBe("block-uid");
+});
+
+test("derives block titles from the first few words", () => {
+  expect(
+    deriveBlockTitle({
+      text: "One two three four five six seven eight nine ten",
+      maxWords: 4,
+    }),
+  ).toBe("One two three four...");
+  expect(deriveBlockTitle({ text: "   " })).toBe("Untitled block");
 });
 
 test("parses and normalizes query builder source settings", () => {
