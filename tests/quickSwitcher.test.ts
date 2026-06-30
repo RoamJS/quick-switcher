@@ -142,6 +142,17 @@ test("parses and sanitizes stored bookmarks", () => {
       },
       {
         id: "id-2",
+        title: "No Shortcut",
+        url: "https://roamresearch.com/#/app/graph/page/no-shortcut",
+      },
+      {
+        id: "id-3",
+        title: "Invalid Shortcut",
+        url: "https://roamresearch.com/#/app/graph/page/invalid-shortcut",
+        shortcut: "Ctrl +",
+      },
+      {
+        id: "id-4",
         title: "Invalid",
         url: "",
         shortcut: "Ctrl + 2",
@@ -149,8 +160,9 @@ test("parses and sanitizes stored bookmarks", () => {
     ],
   });
 
-  expect(parsed).toHaveLength(1);
+  expect(parsed).toHaveLength(2);
   expect(parsed[0].shortcut).toBe("ctrl+1");
+  expect(parsed[1].shortcut).toBeNull();
 });
 
 test("resolves relative urls to absolute urls", () => {

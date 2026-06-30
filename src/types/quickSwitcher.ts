@@ -3,7 +3,7 @@ export type QuickSwitcherBookmark = {
   title: string;
   url: string;
   pageUid: string | null;
-  shortcut: string;
+  shortcut: string | null;
 };
 
 export type ShortcutKeyboardEvent = {
