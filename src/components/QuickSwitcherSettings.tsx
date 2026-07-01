@@ -1,53 +1,51 @@
 import {
   Button,
-  Card,
-  Dialog,
   FormGroup,
   InputGroup,
-  Switch,
+  Menu,
+  MenuItem,
+  Spinner,
   Tag,
-  TextArea,
 } from "@blueprintjs/core";
-import React, { useMemo, useState } from "react";
-import PageInput from "roamjs-components/components/PageInput";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { render as renderToast } from "roamjs-components/components/Toast";
-import getPageTitleByPageUid from "roamjs-components/queries/getPageTitleByPageUid";
-import getPageUidByPageTitle from "roamjs-components/queries/getPageUidByPageTitle";
 import type {
   QuickSwitcherBookmark,
-  QuickSwitcherCommandPaletteSettings,
-  QuickSwitcherQuerySource,
+  QuickSwitcherTargetType,
 } from "~/types/quickSwitcher";
 import {
   buildRoamPageUrl,
   createBookmarkId,
   deriveBlockTitle,
   extractBlockRefUid,
-  formatShortcutForDisplay,
   getBookmarkTargetLabel,
   getBookmarkTargetType,
   getBookmarkTargetUid,
-  keyboardEventToShortcut,
-  moveBookmarkByOffset,
-  normalizeCommandPaletteSettings,
-  normalizeShortcut,
   parsePageUidFromUrl,
-  shortcutHasModifier,
 } from "~/utils/quickSwitcher";
 
 type QuickSwitcherSettingsDependencies = {
   initialBookmarks: QuickSwitcherBookmark[];
-  initialCommandPaletteSettings: QuickSwitcherCommandPaletteSettings;
-  initialQuerySource: QuickSwitcherQuerySource;
-  isMac: boolean;
   onBookmarksChange: (bookmarks: QuickSwitcherBookmark[]) => void;
-  onCommandPaletteSettingsChange: (
-    settings: QuickSwitcherCommandPaletteSettings,
-  ) => void;
-  onQuerySourceChange: (querySource: QuickSwitcherQuerySource) => void;
+};
+
+type EntrySuggestion = {
+  uid: string;
+  title: string;
+  targetType: QuickSwitcherTargetType;
+  url: string;
 };
 
 type ToastIntent = "none" | "primary" | "success" | "warning" | "danger";
+
+const MAX_PAGE_SUGGESTIONS = 8;
+const MAX_BLOCK_SUGGESTIONS = 8;
 
 const showToast = ({
   content,
@@ -64,12 +62,21 @@ const showToast = ({
   });
 };
 
+const toDatalogString = ({ value }: { value: string }): string =>
+  JSON.stringify(value);
+
+const escapeRegex = ({ value }: { value: string }): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getSearchRegex = ({ query }: { query: string }): string =>
+  `(?i)${escapeRegex({ value: query.trim() })}`;
+
 const isPageUrlInput = ({ entry }: { entry: string }): boolean =>
   /^https?:\/\//i.test(entry) ||
   entry.startsWith("#/") ||
   entry.startsWith("/#/");
 
-const getBlockUidFromInput = ({ value }: { value: string }): string => {
+const getUidFromEntryInput = ({ value }: { value: string }): string => {
   const normalizedValue = value.trim();
   return (
     extractBlockRefUid({ value: normalizedValue }) ||
@@ -80,699 +87,527 @@ const getBlockUidFromInput = ({ value }: { value: string }): string => {
   );
 };
 
-const getBlockByUid = ({
-  blockUid,
+const getSuggestionTargetKey = ({
+  suggestion,
 }: {
-  blockUid: string;
-}): { uid: string; text: string } | null => {
-  const block = window.roamAlphaAPI.pull(
-    "[:block/uid :block/string :node/title]",
-    [":block/uid", blockUid],
-  ) as {
-    ":block/uid"?: string;
-    ":node/title"?: string;
-    ":block/string"?: string;
-  } | null;
-  const uid = block?.[":block/uid"] || "";
-  if (!uid || block?.[":node/title"]) {
+  suggestion: EntrySuggestion;
+}): string => `${suggestion.targetType}:${suggestion.uid}`;
+
+const getBookmarkTargetKey = ({
+  bookmark,
+}: {
+  bookmark: QuickSwitcherBookmark;
+}): string => {
+  const targetType = getBookmarkTargetType({ bookmark });
+  const targetUid = getBookmarkTargetUid({ bookmark });
+  return targetUid ? `${targetType}:${targetUid}` : `url:${bookmark.url}`;
+};
+
+const getSavedTargetKeys = ({
+  bookmarks,
+}: {
+  bookmarks: QuickSwitcherBookmark[];
+}): Set<string> =>
+  new Set(bookmarks.map((bookmark) => getBookmarkTargetKey({ bookmark })));
+
+const toSuggestion = ({
+  uid,
+  title,
+  targetType,
+}: {
+  uid: string;
+  title: string;
+  targetType: QuickSwitcherTargetType;
+}): EntrySuggestion | null => {
+  const url = buildRoamPageUrl({ pageUid: uid });
+  if (!uid || !title || !url) {
     return null;
   }
   return {
     uid,
-    text: block?.[":block/string"] || "",
+    title,
+    targetType,
+    url,
   };
+};
+
+const searchEntries = async ({
+  query,
+  savedTargetKeys,
+}: {
+  query: string;
+  savedTargetKeys: Set<string>;
+}): Promise<EntrySuggestion[]> => {
+  const regex = toDatalogString({ value: getSearchRegex({ query }) });
+  const [pageRows, blockRows] = await Promise.all([
+    window.roamAlphaAPI.data.backend.q(
+      `[:find ?uid ?title
+        :where
+        [?page :node/title ?title]
+        [?page :block/uid ?uid]
+        [[re-pattern ${regex}] ?regex]
+        [[re-find ?regex ?title]]]`,
+    ) as Promise<[string, string][]>,
+    window.roamAlphaAPI.data.backend.q(
+      `[:find ?uid ?text
+        :where
+        [?block :block/string ?text]
+        [?block :block/uid ?uid]
+        [[re-pattern ${regex}] ?regex]
+        [[re-find ?regex ?text]]]`,
+    ) as Promise<[string, string][]>,
+  ]);
+
+  const seen = new Set<string>();
+  const addSuggestion = ({
+    suggestion,
+    result,
+  }: {
+    suggestion: EntrySuggestion | null;
+    result: EntrySuggestion[];
+  }): boolean => {
+    if (!suggestion) {
+      return false;
+    }
+    const key = getSuggestionTargetKey({ suggestion });
+    if (savedTargetKeys.has(key) || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    result.push(suggestion);
+    return true;
+  };
+
+  const pages = pageRows
+    .map(([uid, title]) =>
+      toSuggestion({
+        uid,
+        title,
+        targetType: "page",
+      }),
+    )
+    .sort((a, b) => (a?.title || "").localeCompare(b?.title || ""));
+  const blocks = blockRows
+    .map(([uid, text]) =>
+      toSuggestion({
+        uid,
+        title: deriveBlockTitle({ text }),
+        targetType: "block",
+      }),
+    )
+    .sort((a, b) => (a?.title || "").localeCompare(b?.title || ""));
+
+  const suggestions: EntrySuggestion[] = [];
+  let pageSuggestionCount = 0;
+  pages.some((suggestion) => {
+    if (addSuggestion({ suggestion, result: suggestions })) {
+      pageSuggestionCount += 1;
+    }
+    return pageSuggestionCount >= MAX_PAGE_SUGGESTIONS;
+  });
+  let blockSuggestionCount = 0;
+  blocks.some((suggestion) => {
+    if (addSuggestion({ suggestion, result: suggestions })) {
+      blockSuggestionCount += 1;
+    }
+    return blockSuggestionCount >= MAX_BLOCK_SUGGESTIONS;
+  });
+  return suggestions;
+};
+
+const resolveUidToSuggestion = async ({
+  uid,
+}: {
+  uid: string;
+}): Promise<EntrySuggestion | null> => {
+  const datalogUid = toDatalogString({ value: uid });
+  const pageRows = (await window.roamAlphaAPI.data.backend.q(
+    `[:find ?title
+      :where
+      [?page :block/uid ${datalogUid}]
+      [?page :node/title ?title]]`,
+  )) as [string][];
+  const pageTitle = pageRows[0]?.[0] || "";
+  if (pageTitle) {
+    return toSuggestion({
+      uid,
+      title: pageTitle,
+      targetType: "page",
+    });
+  }
+
+  const blockRows = (await window.roamAlphaAPI.data.backend.q(
+    `[:find ?text
+      :where
+      [?block :block/uid ${datalogUid}]
+      [?block :block/string ?text]]`,
+  )) as [string][];
+  const blockText = blockRows[0]?.[0] || "";
+  if (!blockText && !blockRows.length) {
+    return null;
+  }
+  return toSuggestion({
+    uid,
+    title: deriveBlockTitle({ text: blockText }),
+    targetType: "block",
+  });
+};
+
+const resolvePageTitleToSuggestion = async ({
+  title,
+}: {
+  title: string;
+}): Promise<EntrySuggestion | null> => {
+  const rows = (await window.roamAlphaAPI.data.backend.q(
+    `[:find ?uid
+      :where
+      [?page :node/title ${toDatalogString({ value: title })}]
+      [?page :block/uid ?uid]]`,
+  )) as [string][];
+  const pageUid = rows[0]?.[0] || "";
+  if (!pageUid) {
+    return null;
+  }
+  return toSuggestion({
+    uid: pageUid,
+    title,
+    targetType: "page",
+  });
+};
+
+const resolveEntryInput = async ({
+  value,
+}: {
+  value: string;
+}): Promise<EntrySuggestion | null> => {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const uid = getUidFromEntryInput({ value: normalizedValue });
+  if (uid) {
+    const suggestion = await resolveUidToSuggestion({ uid });
+    if (suggestion) {
+      return suggestion;
+    }
+  }
+
+  return resolvePageTitleToSuggestion({ title: normalizedValue });
 };
 
 export const createQuickSwitcherSettingsComponent = ({
   initialBookmarks,
-  initialCommandPaletteSettings,
-  initialQuerySource,
-  isMac,
   onBookmarksChange,
-  onCommandPaletteSettingsChange,
-  onQuerySourceChange,
 }: QuickSwitcherSettingsDependencies): React.FC => {
   const QuickSwitcherSettings = (): React.ReactElement => {
     const [bookmarks, setBookmarks] =
       useState<QuickSwitcherBookmark[]>(initialBookmarks);
-    const [savedCommandPaletteSettings, setSavedCommandPaletteSettings] =
-      useState<QuickSwitcherCommandPaletteSettings>(
-        initialCommandPaletteSettings,
-      );
-    const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(
-      initialCommandPaletteSettings.enabled,
+    const [entryInput, setEntryInput] = useState("");
+    const [suggestions, setSuggestions] = useState<EntrySuggestion[]>([]);
+    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [isInputFocused, setIsInputFocused] = useState(false);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isAdding, setIsAdding] = useState(false);
+    const searchRequestRef = useRef(0);
+
+    const normalizedEntryInput = entryInput.trim();
+    const savedTargetKeys = useMemo(
+      () => getSavedTargetKeys({ bookmarks }),
+      [bookmarks],
     );
-    const [commandPalettePrefix, setCommandPalettePrefix] = useState(
-      initialCommandPaletteSettings.prefix,
+    const shouldShowSuggestions =
+      isInputFocused && (isSearching || suggestions.length > 0);
+
+    useEffect((): void | (() => void) => {
+      const query = entryInput.trim();
+      const requestId = searchRequestRef.current + 1;
+      searchRequestRef.current = requestId;
+      setSelectedIndex(0);
+
+      if (query.length < 2) {
+        setSuggestions([]);
+        setIsSearching(false);
+        return;
+      }
+
+      setIsSearching(true);
+      const timeout = window.setTimeout(() => {
+        void searchEntries({
+          query,
+          savedTargetKeys,
+        })
+          .then((nextSuggestions) => {
+            if (searchRequestRef.current !== requestId) {
+              return;
+            }
+            setSuggestions(nextSuggestions);
+          })
+          .catch(() => {
+            if (searchRequestRef.current !== requestId) {
+              return;
+            }
+            setSuggestions([]);
+          })
+          .finally(() => {
+            if (searchRequestRef.current === requestId) {
+              setIsSearching(false);
+            }
+          });
+      }, 180);
+
+      return () => window.clearTimeout(timeout);
+    }, [entryInput, savedTargetKeys]);
+
+    const setAndPersistBookmarks = useCallback(
+      ({ nextBookmarks }: { nextBookmarks: QuickSwitcherBookmark[] }): void => {
+        setBookmarks(nextBookmarks);
+        onBookmarksChange(nextBookmarks);
+      },
+      [onBookmarksChange],
     );
-    const [savedQuerySource, setSavedQuerySource] =
-      useState<QuickSwitcherQuerySource>(initialQuerySource);
-    const [querySourceEnabled, setQuerySourceEnabled] = useState(
-      initialQuerySource.enabled,
+
+    const clearEntryInput = useCallback((): void => {
+      setEntryInput("");
+      setSuggestions([]);
+      setSelectedIndex(0);
+      setIsSearching(false);
+    }, []);
+
+    const addSuggestion = useCallback(
+      ({ suggestion }: { suggestion: EntrySuggestion }): boolean => {
+        const key = getSuggestionTargetKey({ suggestion });
+        if (savedTargetKeys.has(key)) {
+          showToast({
+            content: `"${suggestion.title}" is already saved`,
+            intent: "warning",
+          });
+          return false;
+        }
+
+        const nextBookmarks = [
+          ...bookmarks,
+          {
+            id: createBookmarkId(),
+            title: suggestion.title,
+            targetType: suggestion.targetType,
+            pageUid: suggestion.targetType === "page" ? suggestion.uid : null,
+            blockUid: suggestion.targetType === "block" ? suggestion.uid : null,
+            url: suggestion.url,
+          },
+        ];
+
+        setAndPersistBookmarks({ nextBookmarks });
+        clearEntryInput();
+        setIsInputFocused(false);
+        showToast({
+          content: `${suggestion.targetType === "page" ? "Page" : "Block"} added`,
+          intent: "success",
+        });
+        return true;
+      },
+      [bookmarks, clearEntryInput, savedTargetKeys, setAndPersistBookmarks],
     );
-    const [querySourceRef, setQuerySourceRef] = useState(
-      initialQuerySource.queryRef,
-    );
-    const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
-    const [pageTitle, setPageTitle] = useState("");
-    const [blockRef, setBlockRef] = useState("");
-    const [shortcut, setShortcut] = useState("");
-    const [bulkPages, setBulkPages] = useState("");
 
-    const shortcutLabel = useMemo(
-      () =>
-        shortcut
-          ? formatShortcutForDisplay({
-              shortcut,
-              isMac,
-            })
-          : "",
-      [isMac, shortcut],
-    );
-    const isQuerySourceDirty =
-      querySourceEnabled !== savedQuerySource.enabled ||
-      querySourceRef.trim() !== savedQuerySource.queryRef;
-    const isCommandPaletteDirty =
-      commandPaletteEnabled !== savedCommandPaletteSettings.enabled ||
-      commandPalettePrefix !== savedCommandPaletteSettings.prefix;
-
-    const setAndPersistBookmarks = ({
-      nextBookmarks,
-    }: {
-      nextBookmarks: QuickSwitcherBookmark[];
-    }): void => {
-      setBookmarks(nextBookmarks);
-      onBookmarksChange(nextBookmarks);
-    };
-
-    const clearForm = (): void => {
-      setPageTitle("");
-      setBlockRef("");
-      setShortcut("");
-    };
-
-    const clearBulkPages = (): void => {
-      setBulkPages("");
-    };
-
-    const resetQuerySource = (): void => {
-      setQuerySourceEnabled(savedQuerySource.enabled);
-      setQuerySourceRef(savedQuerySource.queryRef);
-    };
-
-    const resetCommandPaletteSettings = (): void => {
-      setCommandPaletteEnabled(savedCommandPaletteSettings.enabled);
-      setCommandPalettePrefix(savedCommandPaletteSettings.prefix);
-    };
-
-    const closeManageDialog = (): void => {
-      setIsManageDialogOpen(false);
-      clearForm();
-      clearBulkPages();
-      resetCommandPaletteSettings();
-      resetQuerySource();
-    };
-
-    const onShortcutKeyDown = (
-      event: React.KeyboardEvent<HTMLInputElement>,
-    ): void => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (
-        event.key === "Backspace" ||
-        event.key === "Delete" ||
-        event.key === "Escape"
-      ) {
-        setShortcut("");
-        return;
-      }
-      const nextShortcut = keyboardEventToShortcut({ event });
-      if (!nextShortcut) {
-        return;
-      }
-      setShortcut(nextShortcut);
-    };
-
-    const getValidatedShortcut = (): string | null | undefined => {
-      const normalizedShortcut = shortcut
-        ? normalizeShortcut({ shortcut })
-        : null;
-      if (shortcut && !normalizedShortcut) {
+    const addEntryFromInput = useCallback(async (): Promise<void> => {
+      if (!normalizedEntryInput) {
         showToast({
-          content: "Capture a valid shortcut or leave it blank",
-          intent: "warning",
-        });
-        return undefined;
-      }
-
-      if (
-        normalizedShortcut &&
-        !shortcutHasModifier({ shortcut: normalizedShortcut })
-      ) {
-        showToast({
-          content: "Shortcut must include at least one modifier key",
-          intent: "warning",
-        });
-        return undefined;
-      }
-
-      const existingShortcut = normalizedShortcut
-        ? bookmarks.find((bookmark) => bookmark.shortcut === normalizedShortcut)
-        : null;
-      if (existingShortcut) {
-        showToast({
-          content: `Shortcut already used by "${existingShortcut.title}"`,
-          intent: "warning",
-        });
-        return undefined;
-      }
-
-      return normalizedShortcut;
-    };
-
-    const addBookmark = (): void => {
-      const normalizedPageTitle = pageTitle.trim();
-      if (!normalizedPageTitle) {
-        showToast({
-          content: "Select a Roam page first",
+          content: "Search for a page or block first",
           intent: "warning",
         });
         return;
       }
 
-      const pageUid = getPageUidByPageTitle(normalizedPageTitle);
-      if (!pageUid) {
-        showToast({
-          content: "That page does not exist in this graph",
-          intent: "warning",
+      setIsAdding(true);
+      try {
+        const suggestion = await resolveEntryInput({
+          value: normalizedEntryInput,
         });
-        return;
-      }
-
-      const existingPage = bookmarks.find(
-        (bookmark) =>
-          getBookmarkTargetType({ bookmark }) === "page" &&
-          getBookmarkTargetUid({ bookmark }) === pageUid,
-      );
-      if (existingPage) {
+        if (!suggestion) {
+          showToast({
+            content: "No page or block matched that input",
+            intent: "warning",
+          });
+          return;
+        }
+        addSuggestion({ suggestion });
+      } catch (error) {
         showToast({
-          content: `"${existingPage.title}" is already bookmarked`,
-          intent: "warning",
-        });
-        return;
-      }
-
-      const normalizedShortcut = getValidatedShortcut();
-      if (normalizedShortcut === undefined) {
-        return;
-      }
-
-      const resolvedTitle =
-        getPageTitleByPageUid(pageUid) || normalizedPageTitle;
-      const url = buildRoamPageUrl({ pageUid });
-      if (!url) {
-        showToast({
-          content: "Could not resolve a URL for this page",
+          content: "Unable to add that entry",
           intent: "danger",
         });
-        return;
+      } finally {
+        setIsAdding(false);
       }
+    }, [addSuggestion, normalizedEntryInput]);
 
-      const nextBookmarks = [
-        ...bookmarks,
-        {
-          id: createBookmarkId(),
-          title: resolvedTitle,
-          targetType: "page",
-          pageUid,
-          blockUid: null,
-          url,
-          shortcut: normalizedShortcut,
-        },
-      ];
-
-      setAndPersistBookmarks({ nextBookmarks });
-      clearForm();
-      showToast({
-        content: "Page added",
-        intent: "success",
-      });
-    };
-
-    const addBlock = (): void => {
-      const blockUid = getBlockUidFromInput({ value: blockRef });
-      if (!blockUid) {
-        showToast({
-          content: "Paste a Roam block UID or block reference first",
-          intent: "warning",
+    const removeBookmark = useCallback(
+      ({ bookmark }: { bookmark: QuickSwitcherBookmark }): void => {
+        setAndPersistBookmarks({
+          nextBookmarks: bookmarks.filter((b) => b.id !== bookmark.id),
         });
-        return;
-      }
+      },
+      [bookmarks, setAndPersistBookmarks],
+    );
 
-      const block = getBlockByUid({ blockUid });
-      if (!block) {
-        showToast({
-          content: "That block does not exist in this graph",
-          intent: "warning",
-        });
-        return;
-      }
-
-      const existingBlock = bookmarks.find(
-        (bookmark) =>
-          getBookmarkTargetType({ bookmark }) === "block" &&
-          getBookmarkTargetUid({ bookmark }) === blockUid,
-      );
-      if (existingBlock) {
-        showToast({
-          content: `"${existingBlock.title}" is already bookmarked`,
-          intent: "warning",
-        });
-        return;
-      }
-
-      const normalizedShortcut = getValidatedShortcut();
-      if (normalizedShortcut === undefined) {
-        return;
-      }
-
-      const url = buildRoamPageUrl({ pageUid: blockUid });
-      if (!url) {
-        showToast({
-          content: "Could not resolve a URL for this block",
-          intent: "danger",
-        });
-        return;
-      }
-
-      const nextBookmarks = [
-        ...bookmarks,
-        {
-          id: createBookmarkId(),
-          title: deriveBlockTitle({ text: block.text }),
-          targetType: "block" as const,
-          pageUid: null,
-          blockUid: block.uid,
-          url,
-          shortcut: normalizedShortcut,
-        },
-      ];
-
-      setAndPersistBookmarks({ nextBookmarks });
-      clearForm();
-      showToast({
-        content: "Block added",
-        intent: "success",
-      });
-    };
-
-    const addBulkPages = (): void => {
-      const entries = bulkPages
-        .split(/\r?\n/)
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-      if (!entries.length) {
-        showToast({
-          content: "Add at least one page title or URL",
-          intent: "warning",
-        });
-        return;
-      }
-
-      const existingPageUids = new Set(
-        bookmarks
-          .filter((bookmark) => getBookmarkTargetType({ bookmark }) === "page")
-          .map((bookmark) => getBookmarkTargetUid({ bookmark }))
-          .filter((uid): uid is string => Boolean(uid)),
-      );
-      const nextBookmarks = [...bookmarks];
-      let addedCount = 0;
-      let skippedCount = 0;
-
-      entries.forEach((entry) => {
-        const pageUid = isPageUrlInput({ entry })
-          ? parsePageUidFromUrl({ url: entry })
-          : getPageUidByPageTitle(entry);
-        const title = pageUid ? getPageTitleByPageUid(pageUid) : "";
-        if (!pageUid || !title || existingPageUids.has(pageUid)) {
-          skippedCount += 1;
+    const onInputKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLInputElement>): void => {
+        if (event.key === "ArrowDown") {
+          if (!suggestions.length) {
+            return;
+          }
+          event.preventDefault();
+          setSelectedIndex((current) =>
+            Math.min(current + 1, suggestions.length - 1),
+          );
           return;
         }
 
-        const url = buildRoamPageUrl({ pageUid });
-        if (!url) {
-          skippedCount += 1;
+        if (event.key === "ArrowUp") {
+          if (!suggestions.length) {
+            return;
+          }
+          event.preventDefault();
+          setSelectedIndex((current) => Math.max(current - 1, 0));
           return;
         }
 
-        existingPageUids.add(pageUid);
-        addedCount += 1;
-        nextBookmarks.push({
-          id: createBookmarkId(),
-          title,
-          targetType: "page",
-          pageUid,
-          blockUid: null,
-          url,
-          shortcut: null,
-        });
-      });
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const selectedSuggestion = suggestions[selectedIndex];
+          if (selectedSuggestion) {
+            addSuggestion({ suggestion: selectedSuggestion });
+            return;
+          }
+          void addEntryFromInput();
+          return;
+        }
 
-      if (!addedCount) {
-        showToast({
-          content: "No new pages were added",
-          intent: "warning",
-        });
-        return;
-      }
-
-      setAndPersistBookmarks({ nextBookmarks });
-      clearBulkPages();
-      showToast({
-        content: `Added ${addedCount} ${addedCount === 1 ? "page" : "pages"}${
-          skippedCount ? `, skipped ${skippedCount}` : ""
-        }`,
-        intent: "success",
-      });
-    };
-
-    const saveQuerySource = (): void => {
-      const normalizedQueryRef = querySourceRef.trim();
-      if (querySourceEnabled && !normalizedQueryRef) {
-        showToast({
-          content: "Add a Query Builder query reference first",
-          intent: "warning",
-        });
-        return;
-      }
-
-      const nextQuerySource = {
-        enabled: querySourceEnabled,
-        queryRef: normalizedQueryRef,
-      };
-      setSavedQuerySource(nextQuerySource);
-      onQuerySourceChange(nextQuerySource);
-      showToast({
-        content: "Query Builder source saved",
-        intent: "success",
-      });
-    };
-
-    const saveCommandPaletteSettings = (): void => {
-      if (commandPaletteEnabled && !commandPalettePrefix.trim()) {
-        showToast({
-          content: "Add a command palette prefix first",
-          intent: "warning",
-        });
-        return;
-      }
-
-      const nextCommandPaletteSettings = normalizeCommandPaletteSettings({
-        settings: {
-          enabled: commandPaletteEnabled,
-          prefix: commandPalettePrefix,
-        },
-      });
-      setSavedCommandPaletteSettings(nextCommandPaletteSettings);
-      setCommandPalettePrefix(nextCommandPaletteSettings.prefix);
-      onCommandPaletteSettingsChange(nextCommandPaletteSettings);
-      showToast({
-        content: "Command palette settings saved",
-        intent: "success",
-      });
-    };
+        if (event.key === "Escape") {
+          setSuggestions([]);
+          setIsInputFocused(false);
+        }
+      },
+      [addEntryFromInput, addSuggestion, selectedIndex, suggestions],
+    );
 
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-end">
-          <Button
-            icon="edit"
-            intent="primary"
-            onClick={(): void => setIsManageDialogOpen(true)}
-            text="Manage Entries"
-          />
-        </div>
+        <FormGroup
+          helperText="Search by page title, block text, UID, Roam URL, or block reference."
+          label="Add page or block"
+        >
+          <div className="flex items-start gap-2">
+            <div className="relative min-w-0 flex-1">
+              <InputGroup
+                autoComplete="off"
+                leftIcon="search"
+                onBlur={(): void => {
+                  window.setTimeout(() => setIsInputFocused(false), 120);
+                }}
+                onChange={(
+                  event: React.ChangeEvent<HTMLInputElement>,
+                ): void => {
+                  setEntryInput(event.target.value);
+                  setIsInputFocused(true);
+                }}
+                onFocus={(): void => setIsInputFocused(true)}
+                onKeyDown={onInputKeyDown}
+                placeholder="Search pages, blocks, UIDs, or ((block refs))"
+                rightElement={
+                  isSearching ? (
+                    <Spinner className="mr-2" size={16} />
+                  ) : undefined
+                }
+                value={entryInput}
+              />
+              {shouldShowSuggestions ? (
+                <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded border border-slate-200 bg-white shadow-lg">
+                  {suggestions.length ? (
+                    <Menu>
+                      {suggestions.map((suggestion, index) => (
+                        <MenuItem
+                          active={selectedIndex === index}
+                          icon={
+                            suggestion.targetType === "page"
+                              ? "document"
+                              : "citation"
+                          }
+                          key={getSuggestionTargetKey({ suggestion })}
+                          labelElement={
+                            <Tag minimal>
+                              {suggestion.targetType === "page"
+                                ? "Page"
+                                : "Block"}
+                            </Tag>
+                          }
+                          multiline
+                          onClick={(): void => {
+                            addSuggestion({ suggestion });
+                          }}
+                          onMouseEnter={(): void => setSelectedIndex(index)}
+                          text={
+                            <div className="flex min-w-0 flex-col gap-1 py-1 pr-3">
+                              <div className="truncate">{suggestion.title}</div>
+                              <div className="truncate text-xs text-slate-500">
+                                {suggestion.uid}
+                              </div>
+                            </div>
+                          }
+                        />
+                      ))}
+                    </Menu>
+                  ) : (
+                    <div className="bp3-text-muted px-3 py-2 text-sm">
+                      Searching...
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <Button
+              disabled={!normalizedEntryInput || isAdding}
+              icon="plus"
+              intent="primary"
+              loading={isAdding}
+              onClick={(): void => {
+                void addEntryFromInput();
+              }}
+              text="Add"
+            />
+          </div>
+        </FormGroup>
 
-        <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded border border-slate-200 p-2">
+        <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded border border-slate-200 p-2">
           {bookmarks.length ? (
             bookmarks.map((bookmark) => (
               <div
-                className="flex min-h-[32px] items-center justify-between gap-2 border-b border-slate-100 py-1 last:border-b-0"
+                className="flex min-h-[36px] items-center justify-between gap-2 border-b border-slate-100 py-1 last:border-b-0"
                 key={bookmark.id}
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{bookmark.title}</div>
+                  <div className="truncate text-xs text-slate-500">
+                    {bookmark.url}
+                  </div>
                 </div>
                 <Tag minimal>{getBookmarkTargetLabel({ bookmark })}</Tag>
-                {bookmark.shortcut ? (
-                  <Tag minimal>
-                    {formatShortcutForDisplay({
-                      shortcut: bookmark.shortcut,
-                      isMac,
-                    })}
-                  </Tag>
-                ) : null}
+                <Button
+                  aria-label={`Delete ${bookmark.title}`}
+                  icon="cross"
+                  intent="danger"
+                  minimal
+                  onClick={(): void => removeBookmark({ bookmark })}
+                  small
+                />
               </div>
             ))
           ) : (
             <div className="bp3-text-muted text-sm">
-              No bookmarks configured yet.
+              No saved entries configured yet.
             </div>
           )}
         </div>
-
-        <Dialog
-          canEscapeKeyClose
-          canOutsideClickClose
-          icon="edit"
-          isOpen={isManageDialogOpen}
-          onClose={closeManageDialog}
-          style={{ maxWidth: "95vw", width: 720 }}
-          title="Manage Quick Switcher Entries"
-        >
-          <div className="bp3-dialog-body flex max-h-[72vh] flex-col gap-4 overflow-y-auto">
-            <FormGroup
-              helperText="Start typing to pick from existing Roam pages."
-              label="Page"
-            >
-              <PageInput
-                id="quick-switcher-settings-page-input"
-                placeholder="Type a page title"
-                setValue={setPageTitle}
-                value={pageTitle}
-              />
-            </FormGroup>
-
-            <FormGroup
-              helperText="Paste a block UID, block reference, or Roam block URL."
-              label="Block"
-            >
-              <InputGroup
-                onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
-                  setBlockRef(event.target.value)
-                }
-                placeholder="((abc123def)) or abc123def"
-                value={blockRef}
-              />
-            </FormGroup>
-
-            <FormGroup
-              helperText="Optional. Click then press your keys (e.g. Ctrl + Shift + 1)."
-              label="Shortcut"
-            >
-              <InputGroup
-                onKeyDown={onShortcutKeyDown}
-                placeholder="Capture optional shortcut"
-                readOnly
-                value={shortcutLabel}
-              />
-            </FormGroup>
-
-            <div className="flex flex-wrap gap-2">
-              <Button intent="primary" onClick={addBookmark} text="Add Page" />
-              <Button onClick={addBlock} text="Add Block" />
-              <Button minimal onClick={clearForm} text="Clear" />
-            </div>
-
-            <FormGroup
-              helperText="One existing page title or Roam page URL per line."
-              label="Bulk Add Pages"
-            >
-              <TextArea
-                fill
-                growVertically
-                onChange={(
-                  event: React.ChangeEvent<HTMLTextAreaElement>,
-                ): void => setBulkPages(event.target.value)}
-                placeholder="Project Home&#10;https://roamresearch.com/#/app/graph/page/abc123"
-                rows={4}
-                value={bulkPages}
-              />
-            </FormGroup>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={!bulkPages.trim()}
-                icon="multi-select"
-                onClick={addBulkPages}
-                text="Add Pages"
-              />
-              <Button minimal onClick={clearBulkPages} text="Clear Bulk" />
-            </div>
-
-            <div className="rounded border border-slate-200 p-3">
-              <Switch
-                checked={querySourceEnabled}
-                label="Include Query Builder pages"
-                onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
-                  setQuerySourceEnabled(event.target.checked)
-                }
-              />
-              <FormGroup
-                helperText="Use a query page title, query block label, block UID, or block reference."
-                label="Query Builder Source"
-              >
-                <InputGroup
-                  disabled={!querySourceEnabled}
-                  onChange={(
-                    event: React.ChangeEvent<HTMLInputElement>,
-                  ): void => setQuerySourceRef(event.target.value)}
-                  placeholder="Active Projects, queries/Active Projects, or ((abc123def))"
-                  value={querySourceRef}
-                />
-              </FormGroup>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={!isQuerySourceDirty}
-                  icon="floppy-disk"
-                  onClick={saveQuerySource}
-                  text="Save Source"
-                />
-                <Button
-                  disabled={!isQuerySourceDirty}
-                  minimal
-                  onClick={resetQuerySource}
-                  text="Reset"
-                />
-              </div>
-            </div>
-
-            <div className="rounded border border-slate-200 p-3">
-              <Switch
-                checked={commandPaletteEnabled}
-                label="Add saved entries to command palette"
-                onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
-                  setCommandPaletteEnabled(event.target.checked)
-                }
-              />
-              <FormGroup
-                helperText="Saved commands use this prefix plus the entry title."
-                label="Command Palette Prefix"
-              >
-                <InputGroup
-                  onChange={(
-                    event: React.ChangeEvent<HTMLInputElement>,
-                  ): void => setCommandPalettePrefix(event.target.value)}
-                  placeholder="Q S - "
-                  value={commandPalettePrefix}
-                />
-              </FormGroup>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={!isCommandPaletteDirty}
-                  icon="floppy-disk"
-                  onClick={saveCommandPaletteSettings}
-                  text="Save Commands"
-                />
-                <Button
-                  disabled={!isCommandPaletteDirty}
-                  minimal
-                  onClick={resetCommandPaletteSettings}
-                  text="Reset"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              {bookmarks.length ? (
-                bookmarks.map((bookmark, index) => (
-                  <Card
-                    className="flex items-start justify-between gap-2"
-                    elevation={0}
-                    key={bookmark.id}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">
-                        {bookmark.title}
-                      </div>
-                      <div className="truncate text-xs text-slate-500">
-                        {bookmark.url}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Tag minimal>{getBookmarkTargetLabel({ bookmark })}</Tag>
-                      {bookmark.shortcut ? (
-                        <Tag minimal>
-                          {formatShortcutForDisplay({
-                            shortcut: bookmark.shortcut,
-                            isMac,
-                          })}
-                        </Tag>
-                      ) : null}
-                      <Button
-                        disabled={index === 0}
-                        icon="arrow-up"
-                        minimal
-                        onClick={(): void =>
-                          setAndPersistBookmarks({
-                            nextBookmarks: moveBookmarkByOffset({
-                              bookmarks,
-                              index,
-                              offset: -1,
-                            }),
-                          })
-                        }
-                        small
-                      />
-                      <Button
-                        disabled={index >= bookmarks.length - 1}
-                        icon="arrow-down"
-                        minimal
-                        onClick={(): void =>
-                          setAndPersistBookmarks({
-                            nextBookmarks: moveBookmarkByOffset({
-                              bookmarks,
-                              index,
-                              offset: 1,
-                            }),
-                          })
-                        }
-                        small
-                      />
-                      <Button
-                        icon="trash"
-                        intent="danger"
-                        minimal
-                        onClick={(): void =>
-                          setAndPersistBookmarks({
-                            nextBookmarks: bookmarks.filter(
-                              (b) => b.id !== bookmark.id,
-                            ),
-                          })
-                        }
-                        small
-                      />
-                    </div>
-                  </Card>
-                ))
-              ) : (
-                <div className="bp3-text-muted text-sm">
-                  No bookmarks configured yet.
-                </div>
-              )}
-            </div>
-          </div>
-        </Dialog>
       </div>
     );
   };

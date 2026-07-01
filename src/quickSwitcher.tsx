@@ -2,7 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom";
 import { render as renderToast } from "roamjs-components/components/Toast";
 import getPageTitleByPageUid from "roamjs-components/queries/getPageTitleByPageUid";
-import getPageUidByPageTitle from "roamjs-components/queries/getPageUidByPageTitle";
 import type { OnloadArgs } from "roamjs-components/types/native";
 import type { Result as QueryBuilderResult } from "roamjs-components/types/query-builder";
 import QuickSwitcherDialog from "~/components/QuickSwitcherDialog";
@@ -13,26 +12,29 @@ import type {
 } from "~/types/quickSwitcher";
 import {
   buildRoamPageUrl,
-  extractBlockRefUid,
-  extractQueryBlockLabel,
   getBookmarkTargetLabel,
   getBookmarkTargetType,
   getBookmarkTargetUid,
   getCommandPaletteCommandLabel,
   normalizeCommandPaletteSettings,
-  keyboardEventToShortcut,
   normalizeQuerySource,
-  normalizeShortcut,
   parseStoredCommandPaletteSettings,
   parsePageUidFromUrl,
   parseStoredQuerySource,
   parseStoredBookmarks,
+  resolveActiveQuerySourceUid,
   toAbsoluteUrl,
+  type QueryBuilderSourceCandidate,
 } from "~/utils/quickSwitcher";
 
 const BOOKMARKS_SETTING_KEY = "quickSwitcherBookmarks";
 const QUERY_SOURCE_SETTING_KEY = "quickSwitcherQuerySource";
 const COMMAND_PALETTE_SETTING_KEY = "quickSwitcherCommandPalette";
+export const QUERY_SOURCE_REF_SETTING_KEY = "quickSwitcherQuerySourceRef";
+export const COMMAND_PALETTE_ENABLED_SETTING_KEY =
+  "quickSwitcherCommandPaletteEnabled";
+export const COMMAND_PALETTE_PREFIX_SETTING_KEY =
+  "quickSwitcherCommandPalettePrefix";
 const OPEN_QUICK_SWITCHER_COMMAND = "Quick Switcher: Open";
 
 type ExtensionApi = OnloadArgs["extensionAPI"];
@@ -52,13 +54,6 @@ export type QuickSwitcherController = {
   unload: () => void;
 };
 
-const isMacOs = (): boolean =>
-  /mac|iphone|ipad|ipod/i.test(
-    typeof navigator === "undefined"
-      ? ""
-      : `${navigator.platform} ${navigator.userAgent}`,
-  );
-
 const showToast = ({
   content,
   intent = "none",
@@ -74,44 +69,16 @@ const showToast = ({
   });
 };
 
-const isEditableTarget = ({
-  target,
-}: {
-  target: EventTarget | null;
-}): boolean => {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  if (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement
-  ) {
-    return true;
-  }
-  if (target.isContentEditable) {
-    return true;
-  }
-  return Boolean(
-    target.closest("[contenteditable='true'], .rm-block-input, .cm-content"),
-  );
-};
-
 const sanitizeBookmarks = ({
   bookmarks,
 }: {
   bookmarks: QuickSwitcherBookmark[];
 }): QuickSwitcherBookmark[] => {
-  const seenShortcuts = new Set<string>();
   const seenTargets = new Set<string>();
 
   return bookmarks.reduce<QuickSwitcherBookmark[]>((result, bookmark) => {
-    const normalizedShortcut = bookmark.shortcut
-      ? normalizeShortcut({
-          shortcut: bookmark.shortcut,
-        })
-      : null;
     const normalizedUrl = toAbsoluteUrl({ url: bookmark.url });
-    if (!normalizedUrl || (bookmark.shortcut && !normalizedShortcut)) {
+    if (!normalizedUrl) {
       return result;
     }
     const targetType = getBookmarkTargetType({ bookmark });
@@ -133,23 +100,16 @@ const sanitizeBookmarks = ({
         : pageUid
           ? `page:${pageUid}`
           : `url:${normalizedUrl}`;
-    if (
-      (normalizedShortcut && seenShortcuts.has(normalizedShortcut)) ||
-      seenTargets.has(targetKey)
-    ) {
+    if (seenTargets.has(targetKey)) {
       return result;
     }
 
-    if (normalizedShortcut) {
-      seenShortcuts.add(normalizedShortcut);
-    }
     seenTargets.add(targetKey);
 
     result.push({
       ...bookmark,
       url: normalizedUrl,
       targetType,
-      shortcut: normalizedShortcut,
       pageUid,
       blockUid,
     });
@@ -240,6 +200,7 @@ const mergeBookmarks = ({
 
 const getQueryBuilderApi = (): {
   runQuery: (parentUid: string) => Promise<QueryBuilderResult[]>;
+  listActiveQueries: () => { uid: string }[];
 } | null => {
   const queryBuilder = (
     window as Window & {
@@ -247,85 +208,90 @@ const getQueryBuilderApi = (): {
         extension?: {
           queryBuilder?: {
             runQuery?: (parentUid: string) => Promise<QueryBuilderResult[]>;
+            listActiveQueries?: () => { uid: string }[];
           };
         };
       };
     }
   ).roamjs?.extension?.queryBuilder;
-  return queryBuilder?.runQuery ? { runQuery: queryBuilder.runQuery } : null;
+  return queryBuilder?.runQuery && queryBuilder.listActiveQueries
+    ? {
+        runQuery: queryBuilder.runQuery,
+        listActiveQueries: queryBuilder.listActiveQueries,
+      }
+    : null;
 };
 
-const getUidIfExists = ({ uid }: { uid: string }): string => {
-  if (!uid) {
-    return "";
+const getActiveQueryUids = ({
+  queryBuilder,
+}: {
+  queryBuilder: { listActiveQueries: () => { uid: string }[] };
+}): string[] => {
+  try {
+    return [
+      ...new Set(
+        queryBuilder
+          .listActiveQueries()
+          .map((query) => query.uid)
+          .filter(Boolean),
+      ),
+    ];
+  } catch (error) {
+    return [];
   }
-  const pulled = window.roamAlphaAPI.pull("[:block/uid]", [
-    ":block/uid",
-    uid,
-  ]) as { ":block/uid"?: string } | null;
-  return pulled?.[":block/uid"] || "";
 };
 
-const toDatalogString = ({ value }: { value: string }): string =>
-  JSON.stringify(value);
-
-const findQueryBlockUidByLabel = ({ label }: { label: string }): string => {
-  const normalizedLabel = label.trim();
-  if (!normalizedLabel) {
-    return "";
-  }
-
-  const queryBlockReference = `{{query block:${normalizedLabel}}}`;
-  return (
-    (
-      window.roamAlphaAPI.data.fast.q(
-        `[:find ?uid :where
-          [?b :block/uid ?uid]
-          [?b :block/string ?s]
-          [(clojure.string/includes? ?s ${toDatalogString({
-            value: queryBlockReference,
-          })})]]`,
-      ) as string[][]
-    )[0]?.[0] || ""
-  );
+const resolveActiveQueryMetadata = async ({
+  uid,
+}: {
+  uid: string;
+}): Promise<QueryBuilderSourceCandidate> => {
+  const pulled = (await window.roamAlphaAPI.data.async.pull(
+    "[:block/uid :block/string :node/title]",
+    [":block/uid", uid],
+  )) as {
+    ":block/uid"?: string;
+    ":block/string"?: string;
+    ":node/title"?: string;
+  } | null;
+  return {
+    uid: pulled?.[":block/uid"] || uid,
+    title: pulled?.[":node/title"] || "",
+    text: pulled?.[":block/string"] || "",
+  };
 };
 
-const resolveQueryBuilderUid = ({ queryRef }: { queryRef: string }): string => {
-  const normalizedQueryRef = queryRef.trim();
-  if (!normalizedQueryRef) {
+const resolveQueryBuilderUid = async ({
+  queryRef,
+  queryBuilder,
+}: {
+  queryRef: string;
+  queryBuilder: { listActiveQueries: () => { uid: string }[] };
+}): Promise<string> => {
+  const activeQueryUids = getActiveQueryUids({ queryBuilder });
+  if (!activeQueryUids.length) {
     return "";
   }
 
-  const blockRefUid = extractBlockRefUid({ value: normalizedQueryRef });
-  if (blockRefUid) {
-    return getUidIfExists({ uid: blockRefUid });
-  }
-
-  const existingUid = getUidIfExists({ uid: normalizedQueryRef });
-  if (existingUid) {
-    return existingUid;
-  }
-
-  const queryBlockLabel = extractQueryBlockLabel({
-    value: normalizedQueryRef,
+  const uidOnlyMatch = resolveActiveQuerySourceUid({
+    queryRef,
+    activeQueries: activeQueryUids.map((uid) => ({ uid })),
   });
-  if (queryBlockLabel) {
-    return findQueryBlockUidByLabel({ label: queryBlockLabel });
+  if (uidOnlyMatch) {
+    return uidOnlyMatch;
   }
 
-  const pageUid = getPageUidByPageTitle(normalizedQueryRef);
-  if (pageUid) {
-    return pageUid;
-  }
-
-  const defaultQueryPageUid = getPageUidByPageTitle(
-    `queries/${normalizedQueryRef}`,
+  const activeQueries = await Promise.all(
+    activeQueryUids.map((uid) =>
+      resolveActiveQueryMetadata({ uid }).catch(() => ({ uid })),
+    ),
   );
-  if (defaultQueryPageUid) {
-    return defaultQueryPageUid;
-  }
-
-  return findQueryBlockUidByLabel({ label: normalizedQueryRef });
+  return (
+    resolveActiveQuerySourceUid({
+      queryRef,
+      activeQueries,
+    }) || ""
+  );
 };
 
 const getResultUidCandidates = ({
@@ -360,7 +326,10 @@ const resolveQueryBuilderPageBookmarks = async ({
     return [];
   }
 
-  const queryUid = resolveQueryBuilderUid({ queryRef: querySource.queryRef });
+  const queryUid = await resolveQueryBuilderUid({
+    queryRef: querySource.queryRef,
+    queryBuilder,
+  });
   if (!queryUid) {
     return [];
   }
@@ -392,12 +361,27 @@ const resolveQueryBuilderPageBookmarks = async ({
       pageUid,
       blockUid: null,
       url,
-      shortcut: null,
       source: "query-builder",
     });
     return bookmarks;
   }, []);
 };
+
+const getBooleanSetting = ({
+  value,
+  fallback,
+}: {
+  value: unknown;
+  fallback: boolean;
+}): boolean => (typeof value === "boolean" ? value : fallback);
+
+const getStringSetting = ({
+  value,
+  fallback,
+}: {
+  value: unknown;
+  fallback: string;
+}): string => (typeof value === "string" ? value : fallback);
 
 const initializeQuickSwitcher = ({
   extensionAPI,
@@ -413,11 +397,32 @@ const initializeQuickSwitcher = ({
       value: extensionAPI.settings.get(BOOKMARKS_SETTING_KEY),
     }),
   });
-  let commandPaletteSettings = parseStoredCommandPaletteSettings({
+  const storedCommandPaletteSettings = parseStoredCommandPaletteSettings({
     value: extensionAPI.settings.get(COMMAND_PALETTE_SETTING_KEY),
   });
-  let querySource = parseStoredQuerySource({
+  let commandPaletteSettings = normalizeCommandPaletteSettings({
+    settings: {
+      enabled: getBooleanSetting({
+        value: extensionAPI.settings.get(COMMAND_PALETTE_ENABLED_SETTING_KEY),
+        fallback: storedCommandPaletteSettings.enabled,
+      }),
+      prefix: getStringSetting({
+        value: extensionAPI.settings.get(COMMAND_PALETTE_PREFIX_SETTING_KEY),
+        fallback: storedCommandPaletteSettings.prefix,
+      }),
+    },
+  });
+  const storedQuerySource = parseStoredQuerySource({
     value: extensionAPI.settings.get(QUERY_SOURCE_SETTING_KEY),
+  });
+  let querySource = normalizeQuerySource({
+    querySource: {
+      enabled: storedQuerySource.enabled,
+      queryRef: getStringSetting({
+        value: extensionAPI.settings.get(QUERY_SOURCE_REF_SETTING_KEY),
+        fallback: storedQuerySource.queryRef,
+      }),
+    },
   });
   let dynamicBookmarks: QuickSwitcherBookmark[] = [];
   let registeredBookmarkCommandLabels = new Set<string>();
@@ -437,10 +442,22 @@ const initializeQuickSwitcher = ({
       COMMAND_PALETTE_SETTING_KEY,
       commandPaletteSettings,
     );
+    void extensionAPI.settings.set(
+      COMMAND_PALETTE_ENABLED_SETTING_KEY,
+      commandPaletteSettings.enabled,
+    );
+    void extensionAPI.settings.set(
+      COMMAND_PALETTE_PREFIX_SETTING_KEY,
+      commandPaletteSettings.prefix,
+    );
   };
 
   const persistQuerySource = (): void => {
     void extensionAPI.settings.set(QUERY_SOURCE_SETTING_KEY, querySource);
+    void extensionAPI.settings.set(
+      QUERY_SOURCE_REF_SETTING_KEY,
+      querySource.queryRef,
+    );
   };
 
   const getMergedBookmarks = (): QuickSwitcherBookmark[] =>
@@ -464,7 +481,6 @@ const initializeQuickSwitcher = ({
     ReactDOM.render(
       <QuickSwitcherDialog
         bookmarks={getMergedBookmarks()}
-        isMac={isMacOs()}
         isOpen={isDialogOpen}
         onClose={closeDialog}
         onOpenBookmark={(bookmark): void => {
@@ -519,34 +535,6 @@ const initializeQuickSwitcher = ({
     dynamicBookmarks = [];
     render();
     void refreshQuerySourceBookmarks();
-  };
-
-  const onDocumentKeyDown = (event: KeyboardEvent): void => {
-    if (isDialogOpen) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeDialog();
-      }
-      return;
-    }
-
-    if (isEditableTarget({ target: event.target })) {
-      return;
-    }
-
-    const shortcut = keyboardEventToShortcut({ event });
-    if (!shortcut) {
-      return;
-    }
-
-    const bookmark = bookmarks.find((entry) => entry.shortcut === shortcut);
-    if (!bookmark) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    void openBookmark({ bookmark });
   };
 
   const registerCommand = (): void => {
@@ -631,7 +619,6 @@ const initializeQuickSwitcher = ({
       .catch(() => undefined);
   };
 
-  document.addEventListener("keydown", onDocumentKeyDown, true);
   registerCommand();
   syncBookmarkCommands();
 
@@ -668,7 +655,6 @@ const initializeQuickSwitcher = ({
       refreshQuerySourceId += 1;
       bookmarkCommandSyncId += 1;
       closeDialog();
-      document.removeEventListener("keydown", onDocumentKeyDown, true);
       syncBookmarkCommands();
       unregisterCommand();
       ReactDOM.unmountComponentAtNode(root);

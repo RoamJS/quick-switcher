@@ -7,16 +7,11 @@ import React, {
   useState,
 } from "react";
 import type { QuickSwitcherBookmark } from "~/types/quickSwitcher";
-import {
-  filterBookmarks,
-  formatShortcutForDisplay,
-  getBookmarkTargetLabel,
-} from "~/utils/quickSwitcher";
+import { filterBookmarks, getBookmarkTargetLabel } from "~/utils/quickSwitcher";
 
 type QuickSwitcherDialogProps = {
   isOpen: boolean;
   bookmarks: QuickSwitcherBookmark[];
-  isMac: boolean;
   onClose: () => void;
   onOpenBookmark: (bookmark: QuickSwitcherBookmark) => void;
 };
@@ -27,7 +22,6 @@ const getResultCountLabel = ({ count }: { count: number }): string =>
 const QuickSwitcherDialog = ({
   isOpen,
   bookmarks,
-  isMac,
   onClose,
   onOpenBookmark,
 }: QuickSwitcherDialogProps): React.ReactElement => {
@@ -140,14 +134,6 @@ const QuickSwitcherDialog = ({
                   labelElement={
                     <div className="flex items-center gap-1">
                       <Tag minimal>{getBookmarkTargetLabel({ bookmark })}</Tag>
-                      {bookmark.shortcut ? (
-                        <Tag minimal>
-                          {formatShortcutForDisplay({
-                            shortcut: bookmark.shortcut,
-                            isMac,
-                          })}
-                        </Tag>
-                      ) : null}
                     </div>
                   }
                   multiline

@@ -7,7 +7,6 @@ export type QuickSwitcherBookmark = {
   targetType: QuickSwitcherTargetType;
   pageUid: string | null;
   blockUid: string | null;
-  shortcut: string | null;
   source?: "saved" | "query-builder";
 };
 
@@ -19,12 +18,4 @@ export type QuickSwitcherQuerySource = {
 export type QuickSwitcherCommandPaletteSettings = {
   enabled: boolean;
   prefix: string;
-};
-
-export type ShortcutKeyboardEvent = {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  altKey: boolean;
-  shiftKey: boolean;
 };

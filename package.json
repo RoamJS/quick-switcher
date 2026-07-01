@@ -1,7 +1,7 @@
 {
   "name": "quick-switcher",
   "version": "1.0.0",
-  "description": "Jump to saved pages from a searchable switcher and direct keyboard shortcuts.",
+  "description": "Jump to saved pages and blocks from a searchable switcher and command palette commands.",
   "main": "index.js",
   "scripts": {
     "postinstall": "patch-package",

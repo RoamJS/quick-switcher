@@ -4,75 +4,19 @@ import {
   buildRoamPageUrl,
   deriveBlockTitle,
   extractBlockRefUid,
+  extractQueryBlockAlias,
   extractQueryBlockLabel,
   filterBookmarks,
-  formatShortcutForDisplay,
   getCommandPaletteCommandLabel,
-  keyboardEventToShortcut,
-  moveBookmarkByOffset,
   normalizeCommandPaletteSettings,
   normalizeQuerySource,
-  normalizeShortcut,
   parsePageUidFromUrl,
   parseStoredBookmarks,
   parseStoredCommandPaletteSettings,
   parseStoredQuerySource,
-  shortcutHasModifier,
+  resolveActiveQuerySourceUid,
   toAbsoluteUrl,
 } from "../src/utils/quickSwitcher";
-
-test("normalizes shortcuts into a consistent order", () => {
-  expect(normalizeShortcut({ shortcut: "Shift + Cmd + 2" })).toBe(
-    "meta+shift+2",
-  );
-  expect(normalizeShortcut({ shortcut: "ctrl-alt-k" })).toBe("ctrl+alt+k");
-  expect(normalizeShortcut({ shortcut: "ctrl" })).toBeNull();
-});
-
-test("builds shortcuts from keyboard events", () => {
-  expect(
-    keyboardEventToShortcut({
-      event: {
-        key: "K",
-        ctrlKey: true,
-        metaKey: false,
-        altKey: true,
-        shiftKey: false,
-      },
-    }),
-  ).toBe("ctrl+alt+k");
-  expect(
-    keyboardEventToShortcut({
-      event: {
-        key: " ",
-        ctrlKey: true,
-        metaKey: false,
-        altKey: false,
-        shiftKey: false,
-      },
-    }),
-  ).toBe("ctrl+space");
-});
-
-test("checks whether a shortcut has at least one modifier", () => {
-  expect(shortcutHasModifier({ shortcut: "ctrl+1" })).toBe(true);
-  expect(shortcutHasModifier({ shortcut: "1" })).toBe(false);
-});
-
-test("formats shortcut labels for mac and windows", () => {
-  expect(
-    formatShortcutForDisplay({
-      shortcut: "meta+shift+2",
-      isMac: true,
-    }),
-  ).toBe("Cmd + Shift + 2");
-  expect(
-    formatShortcutForDisplay({
-      shortcut: "meta+shift+2",
-      isMac: false,
-    }),
-  ).toBe("Meta + Shift + 2");
-});
 
 test("parses a page uid from roam page urls", () => {
   expect(
@@ -96,7 +40,6 @@ test("filters bookmarks by title or url", () => {
       targetType: "page",
       pageUid: "alpha",
       blockUid: null,
-      shortcut: "ctrl+1",
     },
     {
       id: "2",
@@ -105,48 +48,12 @@ test("filters bookmarks by title or url", () => {
       targetType: "page",
       pageUid: "research",
       blockUid: null,
-      shortcut: "ctrl+2",
     },
   ];
 
   expect(filterBookmarks({ bookmarks, query: "project" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "notes" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "graph/page" })).toHaveLength(2);
-});
-
-test("moves bookmarks while preserving relative order", () => {
-  const bookmarks: QuickSwitcherBookmark[] = [
-    {
-      id: "1",
-      title: "One",
-      url: "https://roamresearch.com/#/app/graph/page/one",
-      targetType: "page",
-      pageUid: "one",
-      blockUid: null,
-      shortcut: "ctrl+1",
-    },
-    {
-      id: "2",
-      title: "Two",
-      url: "https://roamresearch.com/#/app/graph/page/two",
-      targetType: "page",
-      pageUid: "two",
-      blockUid: null,
-      shortcut: "ctrl+2",
-    },
-    {
-      id: "3",
-      title: "Three",
-      url: "https://roamresearch.com/#/app/graph/page/three",
-      targetType: "page",
-      pageUid: "three",
-      blockUid: null,
-      shortcut: "ctrl+3",
-    },
-  ];
-
-  const moved = moveBookmarkByOffset({ bookmarks, index: 2, offset: -1 });
-  expect(moved.map((bookmark) => bookmark.id)).toEqual(["1", "3", "2"]);
 });
 
 test("parses and sanitizes stored bookmarks", () => {
@@ -185,10 +92,8 @@ test("parses and sanitizes stored bookmarks", () => {
     ],
   });
 
-  expect(parsed).toHaveLength(3);
+  expect(parsed).toHaveLength(4);
   expect(parsed[0].targetType).toBe("page");
-  expect(parsed[0].shortcut).toBe("ctrl+1");
-  expect(parsed[1].shortcut).toBeNull();
   expect(parsed[2].targetType).toBe("block");
   expect(parsed[2].blockUid).toBe("block-uid");
 });
@@ -217,7 +122,7 @@ test("parses and normalizes command palette settings", () => {
   });
   expect(parseStoredCommandPaletteSettings({ value: "invalid" })).toEqual({
     enabled: false,
-    prefix: "Q S - ",
+    prefix: "QS: ",
   });
   expect(
     normalizeCommandPaletteSettings({
@@ -228,7 +133,18 @@ test("parses and normalizes command palette settings", () => {
     }),
   ).toEqual({
     enabled: true,
-    prefix: "Q S - ",
+    prefix: "QS: ",
+  });
+  expect(
+    parseStoredCommandPaletteSettings({
+      value: {
+        enabled: true,
+        prefix: "Q S - ",
+      },
+    }),
+  ).toEqual({
+    enabled: true,
+    prefix: "QS: ",
   });
 });
 
@@ -242,7 +158,6 @@ test("builds command palette labels from prefix and entry title", () => {
         pageUid: null,
         blockUid: "block-1",
         url: "https://roamresearch.com/#/app/graph/page/block-1",
-        shortcut: null,
       },
       settings: {
         enabled: true,
@@ -269,9 +184,20 @@ test("parses and normalizes query builder source settings", () => {
     queryRef: "",
   });
   expect(
+    parseStoredQuerySource({
+      value: {
+        enabled: false,
+        queryRef: "queries/Active Projects",
+      },
+    }),
+  ).toEqual({
+    enabled: true,
+    queryRef: "queries/Active Projects",
+  });
+  expect(
     normalizeQuerySource({
       querySource: {
-        enabled: true,
+        enabled: false,
         queryRef: "  ((abc123def))  ",
       },
     }),
@@ -294,6 +220,61 @@ test("extracts query builder labels from query block refs", () => {
   ).toBe("Active Projects");
   expect(extractQueryBlockLabel({ value: "{{query block}}" })).toBeNull();
   expect(extractQueryBlockLabel({ value: "Active Projects" })).toBeNull();
+  expect(
+    extractQueryBlockAlias({
+      value: "Run {{query block:Active Projects}} from this block",
+    }),
+  ).toBe("Active Projects");
+});
+
+test("resolves query builder source refs against active queries", () => {
+  const activeQueries = [
+    {
+      uid: "query-page-uid",
+      title: "queries/Active Projects",
+    },
+    {
+      uid: "query-block-uid",
+      text: "Run {{query block:Waiting On}}",
+    },
+  ];
+
+  expect(
+    resolveActiveQuerySourceUid({
+      queryRef: "query-page-uid",
+      activeQueries,
+    }),
+  ).toBe("query-page-uid");
+  expect(
+    resolveActiveQuerySourceUid({
+      queryRef: "((query-block-uid))",
+      activeQueries,
+    }),
+  ).toBe("query-block-uid");
+  expect(
+    resolveActiveQuerySourceUid({
+      queryRef: "Active Projects",
+      activeQueries,
+    }),
+  ).toBe("query-page-uid");
+  expect(
+    resolveActiveQuerySourceUid({
+      queryRef: "{{query block:Waiting On}}",
+      activeQueries,
+    }),
+  ).toBe("query-block-uid");
+  expect(
+    resolveActiveQuerySourceUid({
+      queryRef: "Waiting On",
+      activeQueries,
+    }),
+  ).toBe("query-block-uid");
+  expect(
+    resolveActiveQuerySourceUid({
+      queryRef: "Inactive Query",
+      activeQueries,
+    }),
+  ).toBeNull();
 });
 
 test("resolves relative urls to absolute urls", () => {

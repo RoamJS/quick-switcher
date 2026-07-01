@@ -3,214 +3,31 @@ import type {
   QuickSwitcherCommandPaletteSettings,
   QuickSwitcherQuerySource,
   QuickSwitcherTargetType,
-  ShortcutKeyboardEvent,
 } from "~/types/quickSwitcher";
-
-const MODIFIER_ORDER = ["ctrl", "meta", "alt", "shift"] as const;
-const MODIFIER_SET = new Set<string>(MODIFIER_ORDER);
-const MODIFIER_EVENT_KEYS = new Set(["control", "meta", "alt", "shift"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]+)\)\)/;
+const QUERY_BLOCK_REFERENCE_REGEX = /\{\{query block(?::([^}]+))?\}\}/i;
 const QUERY_BLOCK_REGEX = /^\{\{query block(?::(.+?))?\}\}$/i;
+
+export type QueryBuilderSourceCandidate = {
+  uid: string;
+  title?: string;
+  text?: string;
+};
 
 const DEFAULT_QUERY_SOURCE: QuickSwitcherQuerySource = {
   enabled: false,
   queryRef: "",
 };
-const DEFAULT_COMMAND_PALETTE_PREFIX = "Q S - ";
+export const DEFAULT_COMMAND_PALETTE_PREFIX = "QS: ";
+const LEGACY_COMMAND_PALETTE_PREFIX = "Q S - ";
 
 const DEFAULT_COMMAND_PALETTE_SETTINGS: QuickSwitcherCommandPaletteSettings = {
   enabled: false,
   prefix: DEFAULT_COMMAND_PALETTE_PREFIX,
-};
-
-const normalizeModifierToken = ({ token }: { token: string }): string => {
-  const normalizedToken = token.toLowerCase().trim();
-  if (normalizedToken === "cmd" || normalizedToken === "command") {
-    return "meta";
-  }
-  if (normalizedToken === "option") {
-    return "alt";
-  }
-  if (normalizedToken === "super" || normalizedToken === "win") {
-    return "meta";
-  }
-  return normalizedToken;
-};
-
-const normalizeKeyToken = ({ token }: { token: string }): string => {
-  const lowerToken = token.toLowerCase();
-  if (lowerToken === " " || lowerToken.trim() === "spacebar") {
-    return "space";
-  }
-  const normalizedToken = lowerToken.trim();
-  if (!normalizedToken) {
-    return "";
-  }
-  if (normalizedToken === "space") {
-    return "space";
-  }
-  if (normalizedToken === "esc") {
-    return "escape";
-  }
-  return normalizedToken;
-};
-
-const sortAndJoinShortcutTokens = ({
-  modifierTokens,
-  keyToken,
-}: {
-  modifierTokens: Set<string>;
-  keyToken: string;
-}): string => {
-  const orderedModifiers = MODIFIER_ORDER.filter((token) =>
-    modifierTokens.has(token),
-  );
-  return [...orderedModifiers, keyToken].join("+");
-};
-
-export const normalizeShortcut = ({
-  shortcut,
-}: {
-  shortcut: string;
-}): string | null => {
-  const rawTokens = shortcut
-    .split(/[+-]/)
-    .map((token) => normalizeModifierToken({ token }))
-    .filter(Boolean);
-  if (!rawTokens.length) {
-    return null;
-  }
-
-  const modifierTokens = new Set<string>();
-  let keyToken = "";
-
-  rawTokens.forEach((token) => {
-    const normalizedToken = normalizeKeyToken({ token });
-    if (!normalizedToken) {
-      return;
-    }
-    if (MODIFIER_SET.has(normalizedToken)) {
-      modifierTokens.add(normalizedToken);
-      return;
-    }
-    if (!keyToken) {
-      keyToken = normalizedToken;
-    }
-  });
-
-  if (!keyToken) {
-    return null;
-  }
-
-  return sortAndJoinShortcutTokens({ modifierTokens, keyToken });
-};
-
-export const shortcutHasModifier = ({
-  shortcut,
-}: {
-  shortcut: string;
-}): boolean => {
-  const normalizedShortcut = normalizeShortcut({ shortcut });
-  if (!normalizedShortcut) {
-    return false;
-  }
-  return normalizedShortcut.split("+").some((token) => MODIFIER_SET.has(token));
-};
-
-const normalizeKeyboardEventKey = ({ key }: { key: string }): string => {
-  const normalizedKey = normalizeKeyToken({ token: key });
-  if (normalizedKey.length === 1) {
-    return normalizedKey;
-  }
-  if (normalizedKey.startsWith("arrow")) {
-    return normalizedKey;
-  }
-  if (normalizedKey === "enter" || normalizedKey === "tab") {
-    return normalizedKey;
-  }
-  if (normalizedKey === "backspace" || normalizedKey === "delete") {
-    return normalizedKey;
-  }
-  return normalizedKey;
-};
-
-export const keyboardEventToShortcut = ({
-  event,
-}: {
-  event: ShortcutKeyboardEvent;
-}): string | null => {
-  const keyToken = normalizeKeyboardEventKey({ key: event.key });
-  if (!keyToken || MODIFIER_EVENT_KEYS.has(keyToken)) {
-    return null;
-  }
-
-  const modifierTokens = new Set<string>();
-  if (event.ctrlKey) {
-    modifierTokens.add("ctrl");
-  }
-  if (event.metaKey) {
-    modifierTokens.add("meta");
-  }
-  if (event.altKey) {
-    modifierTokens.add("alt");
-  }
-  if (event.shiftKey) {
-    modifierTokens.add("shift");
-  }
-
-  return sortAndJoinShortcutTokens({ modifierTokens, keyToken });
-};
-
-const labelShortcutToken = ({
-  token,
-  isMac,
-}: {
-  token: string;
-  isMac: boolean;
-}): string => {
-  if (token === "ctrl") {
-    return "Ctrl";
-  }
-  if (token === "meta") {
-    return isMac ? "Cmd" : "Meta";
-  }
-  if (token === "alt") {
-    return isMac ? "Opt" : "Alt";
-  }
-  if (token === "shift") {
-    return "Shift";
-  }
-  if (token === "space") {
-    return "Space";
-  }
-  if (token.startsWith("arrow")) {
-    return token.replace("arrow", "Arrow ");
-  }
-  if (token.length === 1) {
-    return token.toUpperCase();
-  }
-  return token[0].toUpperCase() + token.slice(1);
-};
-
-export const formatShortcutForDisplay = ({
-  shortcut,
-  isMac,
-}: {
-  shortcut: string;
-  isMac: boolean;
-}): string => {
-  const normalizedShortcut = normalizeShortcut({ shortcut });
-  if (!normalizedShortcut) {
-    return "";
-  }
-  return normalizedShortcut
-    .split("+")
-    .map((token) => labelShortcutToken({ token, isMac }))
-    .join(" + ");
 };
 
 const getBaseOrigin = (): string => {
@@ -413,31 +230,6 @@ export const filterBookmarks = ({
   });
 };
 
-export const moveBookmarkByOffset = ({
-  bookmarks,
-  index,
-  offset,
-}: {
-  bookmarks: QuickSwitcherBookmark[];
-  index: number;
-  offset: number;
-}): QuickSwitcherBookmark[] => {
-  const nextIndex = index + offset;
-  if (
-    index < 0 ||
-    nextIndex < 0 ||
-    index >= bookmarks.length ||
-    nextIndex >= bookmarks.length
-  ) {
-    return bookmarks;
-  }
-
-  const nextBookmarks = [...bookmarks];
-  const [bookmark] = nextBookmarks.splice(index, 1);
-  nextBookmarks.splice(nextIndex, 0, bookmark);
-  return nextBookmarks;
-};
-
 const parseStoredBookmark = ({
   value,
   index,
@@ -451,14 +243,7 @@ const parseStoredBookmark = ({
 
   const url = typeof value.url === "string" ? value.url.trim() : "";
   const title = typeof value.title === "string" ? value.title.trim() : "";
-  const shortcut =
-    typeof value.shortcut === "string" ? value.shortcut.trim() : "";
   if (!url || !title) {
-    return null;
-  }
-
-  const normalizedShortcut = shortcut ? normalizeShortcut({ shortcut }) : null;
-  if (shortcut && !normalizedShortcut) {
     return null;
   }
 
@@ -487,7 +272,6 @@ const parseStoredBookmark = ({
     targetType,
     pageUid: resolvedPageUid || null,
     blockUid: resolvedBlockUid || null,
-    shortcut: normalizedShortcut,
   };
 };
 
@@ -514,9 +298,10 @@ export const parseStoredQuerySource = ({
   }
 
   const queryRef = typeof value.queryRef === "string" ? value.queryRef : "";
+  const normalizedQueryRef = queryRef.trim();
   return {
-    enabled: Boolean(value.enabled),
-    queryRef: queryRef.trim(),
+    enabled: Boolean(normalizedQueryRef),
+    queryRef: normalizedQueryRef,
   };
 };
 
@@ -524,10 +309,13 @@ export const normalizeQuerySource = ({
   querySource,
 }: {
   querySource: QuickSwitcherQuerySource;
-}): QuickSwitcherQuerySource => ({
-  enabled: Boolean(querySource.enabled),
-  queryRef: querySource.queryRef.trim(),
-});
+}): QuickSwitcherQuerySource => {
+  const queryRef = querySource.queryRef.trim();
+  return {
+    enabled: Boolean(queryRef),
+    queryRef,
+  };
+};
 
 export const parseStoredCommandPaletteSettings = ({
   value,
@@ -540,7 +328,9 @@ export const parseStoredCommandPaletteSettings = ({
 
   const prefix =
     typeof value.prefix === "string" && value.prefix.trim()
-      ? value.prefix
+      ? value.prefix === LEGACY_COMMAND_PALETTE_PREFIX
+        ? DEFAULT_COMMAND_PALETTE_PREFIX
+        : value.prefix
       : DEFAULT_COMMAND_PALETTE_PREFIX;
   return {
     enabled: Boolean(value.enabled),
@@ -584,6 +374,71 @@ export const extractQueryBlockLabel = ({
   const match = value.trim().match(QUERY_BLOCK_REGEX);
   const label = match?.[1]?.trim();
   return label || null;
+};
+
+export const extractQueryBlockAlias = ({
+  value,
+}: {
+  value: string;
+}): string | null =>
+  value.match(QUERY_BLOCK_REFERENCE_REGEX)?.[1]?.trim() || null;
+
+const normalizeLookupValue = ({ value }: { value: string }): string =>
+  value.trim().toLowerCase();
+
+export const resolveActiveQuerySourceUid = ({
+  queryRef,
+  activeQueries,
+}: {
+  queryRef: string;
+  activeQueries: QueryBuilderSourceCandidate[];
+}): string | null => {
+  const normalizedQueryRef = queryRef.trim();
+  if (!normalizedQueryRef) {
+    return null;
+  }
+
+  const directUid =
+    extractBlockRefUid({ value: normalizedQueryRef }) || normalizedQueryRef;
+  if (activeQueries.some((query) => query.uid === directUid)) {
+    return directUid;
+  }
+
+  const queryBlockLabel = extractQueryBlockLabel({
+    value: normalizedQueryRef,
+  });
+  const lookupValues = new Set<string>([
+    normalizeLookupValue({ value: normalizedQueryRef }),
+  ]);
+  if (queryBlockLabel) {
+    lookupValues.add(normalizeLookupValue({ value: queryBlockLabel }));
+  }
+
+  return (
+    activeQueries.find((query) => {
+      const title = query.title?.trim() || "";
+      if (title) {
+        const normalizedTitle = normalizeLookupValue({ value: title });
+        if (lookupValues.has(normalizedTitle)) {
+          return true;
+        }
+        if (
+          [...lookupValues].some(
+            (lookupValue) => normalizedTitle === `queries/${lookupValue}`,
+          )
+        ) {
+          return true;
+        }
+      }
+
+      const alias = query.text
+        ? extractQueryBlockAlias({ value: query.text })
+        : null;
+      return alias
+        ? lookupValues.has(normalizeLookupValue({ value: alias }))
+        : false;
+    })?.uid || null
+  );
 };
 
 export const createBookmarkId = (): string =>
