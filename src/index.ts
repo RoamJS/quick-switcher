@@ -3,16 +3,12 @@ import { render as renderToast } from "roamjs-components/components/Toast";
 import initializeQuickSwitcher, {
   COMMAND_PALETTE_ENABLED_SETTING_KEY,
   COMMAND_PALETTE_PREFIX_SETTING_KEY,
-  QUERY_SOURCE_REF_SETTING_KEY,
 } from "~/quickSwitcher";
-import { createQuickSwitcherSettingsComponent } from "~/components/QuickSwitcherSettings";
-import { createQuerySourceSettingsComponent } from "~/components/QuerySourceSettings";
 import { DEFAULT_COMMAND_PALETTE_PREFIX } from "~/utils/quickSwitcher";
 
 export default runExtension(async ({ extensionAPI }) => {
   const quickSwitcher = initializeQuickSwitcher({ extensionAPI });
   const commandPaletteSettings = quickSwitcher.getCommandPaletteSettings();
-  const querySource = quickSwitcher.getQuerySource();
 
   if (
     typeof extensionAPI.settings.get(COMMAND_PALETTE_ENABLED_SETTING_KEY) !==
@@ -32,23 +28,6 @@ export default runExtension(async ({ extensionAPI }) => {
       commandPaletteSettings.prefix,
     );
   }
-  if (
-    typeof extensionAPI.settings.get(QUERY_SOURCE_REF_SETTING_KEY) !== "string"
-  ) {
-    await extensionAPI.settings.set(
-      QUERY_SOURCE_REF_SETTING_KEY,
-      querySource.queryRef,
-    );
-  }
-
-  const settingsComponent = createQuickSwitcherSettingsComponent({
-    initialBookmarks: quickSwitcher.getBookmarks(),
-    onBookmarksChange: quickSwitcher.setBookmarks,
-  });
-  const querySourceComponent = createQuerySourceSettingsComponent({
-    initialQuerySource: quickSwitcher.getQuerySource(),
-    onQuerySourceChange: quickSwitcher.setQuerySource,
-  });
 
   extensionAPI.settings.panel.create({
     tabTitle: "Quick Switcher",
@@ -64,22 +43,13 @@ export default runExtension(async ({ extensionAPI }) => {
         },
       },
       {
-        id: "bookmarked-entries",
+        id: "manage-saved-entries",
         name: "Saved Entries",
-        description:
-          "Add Roam pages or blocks by title, text, UID, URL, or block reference.",
+        description: "Add or remove saved Quick Switcher entries.",
         action: {
-          type: "reactComponent",
-          component: settingsComponent,
-        },
-      },
-      {
-        id: "query-builder-source",
-        name: "Query Builder Source",
-        description: "Use pages returned by a selected Query Builder query.",
-        action: {
-          type: "reactComponent",
-          component: querySourceComponent,
+          type: "button",
+          content: "Manage Saved Entries",
+          onClick: () => quickSwitcher.open({ mode: "manage" }),
         },
       },
       {

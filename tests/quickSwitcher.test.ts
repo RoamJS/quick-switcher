@@ -4,19 +4,19 @@ import {
   buildRoamPageUrl,
   deriveBlockTitle,
   extractBlockRefUid,
-  extractQueryBlockAlias,
-  extractQueryBlockLabel,
   filterBookmarks,
   getCommandPaletteCommandLabel,
   normalizeCommandPaletteSettings,
-  normalizeQuerySource,
   parsePageUidFromUrl,
   parseStoredBookmarks,
   parseStoredCommandPaletteSettings,
-  parseStoredQuerySource,
-  resolveActiveQuerySourceUid,
   toAbsoluteUrl,
 } from "../src/utils/quickSwitcher";
+import {
+  createBookmarkFromSuggestion,
+  getBlockBreadcrumbsFromPull,
+  getSavedTargetKeys,
+} from "../src/utils/quickSwitcherEntries";
 
 test("parses a page uid from roam page urls", () => {
   expect(
@@ -44,6 +44,7 @@ test("filters bookmarks by title or url", () => {
     {
       id: "2",
       title: "Research Notes",
+      alias: "Lab notebook",
       url: "https://roamresearch.com/#/app/graph/page/research",
       targetType: "page",
       pageUid: "research",
@@ -52,6 +53,7 @@ test("filters bookmarks by title or url", () => {
   ];
 
   expect(filterBookmarks({ bookmarks, query: "project" })).toHaveLength(1);
+  expect(filterBookmarks({ bookmarks, query: "lab" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "notes" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "graph/page" })).toHaveLength(2);
 });
@@ -73,8 +75,10 @@ test("parses and sanitizes stored bookmarks", () => {
       {
         id: "id-3",
         title: "A saved block entry with a title",
+        alias: "Block alias",
         targetType: "block",
         blockUid: "block-uid",
+        breadcrumbs: ["Daily Notes", "Parent block"],
         url: "https://roamresearch.com/#/app/graph/page/block-uid",
       },
       {
@@ -95,7 +99,74 @@ test("parses and sanitizes stored bookmarks", () => {
   expect(parsed).toHaveLength(4);
   expect(parsed[0].targetType).toBe("page");
   expect(parsed[2].targetType).toBe("block");
+  expect(parsed[2].alias).toBe("Block alias");
   expect(parsed[2].blockUid).toBe("block-uid");
+  expect(parsed[2].breadcrumbs).toEqual(["Daily Notes", "Parent block"]);
+});
+
+test("builds saved target keys and bookmarks from entry suggestions", () => {
+  const bookmarks: QuickSwitcherBookmark[] = [
+    {
+      id: "id-1",
+      title: "Existing Page",
+      targetType: "page",
+      pageUid: "existing-page",
+      blockUid: null,
+      url: "https://roamresearch.com/#/app/graph/page/existing-page",
+    },
+    {
+      id: "id-2",
+      title: "Follow up block",
+      targetType: "block",
+      pageUid: null,
+      blockUid: "follow-up",
+      url: "https://roamresearch.com/#/app/graph/page/follow-up",
+    },
+  ];
+
+  expect(getSavedTargetKeys({ bookmarks })).toEqual(
+    new Set(["page:existing-page", "block:follow-up"]),
+  );
+  expect(
+    createBookmarkFromSuggestion({
+      id: "new-block",
+      suggestion: {
+        uid: "new-block-uid",
+        title: "New block",
+        targetType: "block",
+        breadcrumbs: ["Daily Notes", "Parent block"],
+        url: "https://roamresearch.com/#/app/graph/page/new-block-uid",
+      },
+    }),
+  ).toEqual({
+    id: "new-block",
+    title: "New block",
+    targetType: "block",
+    pageUid: null,
+    blockUid: "new-block-uid",
+    breadcrumbs: ["Daily Notes", "Parent block"],
+    url: "https://roamresearch.com/#/app/graph/page/new-block-uid",
+  });
+});
+
+test("extracts block breadcrumbs from pulled block parents", () => {
+  expect(
+    getBlockBreadcrumbsFromPull({
+      block: {
+        ":block/page": {
+          ":node/title": "December 3rd, 2023",
+        },
+        ":block/parents": [
+          {
+            ":block/string": "Untitled - test (12/3/2023, 4:31:21 PM)",
+          },
+          {
+            ":node/title": "December 3rd, 2023",
+          },
+        ],
+      },
+    }),
+  ).toEqual(["December 3rd, 2023", "Untitled - test (12/3/2023, 4:31:21 PM)"]);
 });
 
 test("derives block titles from the first few words", () => {
@@ -154,6 +225,7 @@ test("builds command palette labels from prefix and entry title", () => {
       bookmark: {
         id: "block-1",
         title: "Follow up with team",
+        alias: "Team follow-up",
         targetType: "block",
         pageUid: null,
         blockUid: "block-1",
@@ -164,47 +236,7 @@ test("builds command palette labels from prefix and entry title", () => {
         prefix: "QS - ",
       },
     }),
-  ).toBe("QS - Follow up with team");
-});
-
-test("parses and normalizes query builder source settings", () => {
-  expect(
-    parseStoredQuerySource({
-      value: {
-        enabled: true,
-        queryRef: "  queries/Active Projects  ",
-      },
-    }),
-  ).toEqual({
-    enabled: true,
-    queryRef: "queries/Active Projects",
-  });
-  expect(parseStoredQuerySource({ value: "invalid" })).toEqual({
-    enabled: false,
-    queryRef: "",
-  });
-  expect(
-    parseStoredQuerySource({
-      value: {
-        enabled: false,
-        queryRef: "queries/Active Projects",
-      },
-    }),
-  ).toEqual({
-    enabled: true,
-    queryRef: "queries/Active Projects",
-  });
-  expect(
-    normalizeQuerySource({
-      querySource: {
-        enabled: false,
-        queryRef: "  ((abc123def))  ",
-      },
-    }),
-  ).toEqual({
-    enabled: true,
-    queryRef: "((abc123def))",
-  });
+  ).toBe("QS - Team follow-up (Follow up with team)");
 });
 
 test("extracts block uids from roam block refs", () => {
@@ -212,69 +244,6 @@ test("extracts block uids from roam block refs", () => {
     "abc123_DEF",
   );
   expect(extractBlockRefUid({ value: "not a block ref" })).toBeNull();
-});
-
-test("extracts query builder labels from query block refs", () => {
-  expect(
-    extractQueryBlockLabel({ value: "{{query block:Active Projects}}" }),
-  ).toBe("Active Projects");
-  expect(extractQueryBlockLabel({ value: "{{query block}}" })).toBeNull();
-  expect(extractQueryBlockLabel({ value: "Active Projects" })).toBeNull();
-  expect(
-    extractQueryBlockAlias({
-      value: "Run {{query block:Active Projects}} from this block",
-    }),
-  ).toBe("Active Projects");
-});
-
-test("resolves query builder source refs against active queries", () => {
-  const activeQueries = [
-    {
-      uid: "query-page-uid",
-      title: "queries/Active Projects",
-    },
-    {
-      uid: "query-block-uid",
-      text: "Run {{query block:Waiting On}}",
-    },
-  ];
-
-  expect(
-    resolveActiveQuerySourceUid({
-      queryRef: "query-page-uid",
-      activeQueries,
-    }),
-  ).toBe("query-page-uid");
-  expect(
-    resolveActiveQuerySourceUid({
-      queryRef: "((query-block-uid))",
-      activeQueries,
-    }),
-  ).toBe("query-block-uid");
-  expect(
-    resolveActiveQuerySourceUid({
-      queryRef: "Active Projects",
-      activeQueries,
-    }),
-  ).toBe("query-page-uid");
-  expect(
-    resolveActiveQuerySourceUid({
-      queryRef: "{{query block:Waiting On}}",
-      activeQueries,
-    }),
-  ).toBe("query-block-uid");
-  expect(
-    resolveActiveQuerySourceUid({
-      queryRef: "Waiting On",
-      activeQueries,
-    }),
-  ).toBe("query-block-uid");
-  expect(
-    resolveActiveQuerySourceUid({
-      queryRef: "Inactive Query",
-      activeQueries,
-    }),
-  ).toBeNull();
 });
 
 test("resolves relative urls to absolute urls", () => {

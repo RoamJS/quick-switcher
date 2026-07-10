@@ -1,8 +1,11 @@
 node_modules
+.DS_Store
 build
+coverage
 dist
 out
 .env
 extension.js
+extension.js.map
 extension.js.LICENSE.txt
 local/

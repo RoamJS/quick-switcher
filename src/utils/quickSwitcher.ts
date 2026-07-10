@@ -1,7 +1,6 @@
 import type {
   QuickSwitcherBookmark,
   QuickSwitcherCommandPaletteSettings,
-  QuickSwitcherQuerySource,
   QuickSwitcherTargetType,
 } from "~/types/quickSwitcher";
 
@@ -9,19 +8,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]+)\)\)/;
-const QUERY_BLOCK_REFERENCE_REGEX = /\{\{query block(?::([^}]+))?\}\}/i;
-const QUERY_BLOCK_REGEX = /^\{\{query block(?::(.+?))?\}\}$/i;
-
-export type QueryBuilderSourceCandidate = {
-  uid: string;
-  title?: string;
-  text?: string;
-};
-
-const DEFAULT_QUERY_SOURCE: QuickSwitcherQuerySource = {
-  enabled: false,
-  queryRef: "",
-};
 export const DEFAULT_COMMAND_PALETTE_PREFIX = "QS: ";
 const LEGACY_COMMAND_PALETTE_PREFIX = "Q S - ";
 
@@ -221,9 +207,11 @@ export const filterBookmarks = ({
     return bookmarks;
   }
   return bookmarks.filter((bookmark) => {
+    const normalizedAlias = (bookmark.alias || "").toLowerCase();
     const normalizedTitle = bookmark.title.toLowerCase();
     const normalizedUrl = bookmark.url.toLowerCase();
     return (
+      normalizedAlias.includes(normalizedQuery) ||
       normalizedTitle.includes(normalizedQuery) ||
       normalizedUrl.includes(normalizedQuery)
     );
@@ -264,14 +252,26 @@ const parseStoredBookmark = ({
     typeof value.id === "string" && value.id.trim()
       ? value.id
       : `${url}-${index}`;
+  const alias =
+    typeof value.alias === "string" && value.alias.trim()
+      ? value.alias.replace(/\s+/g, " ").trim()
+      : undefined;
+  const breadcrumbs = Array.isArray(value.breadcrumbs)
+    ? value.breadcrumbs
+        .filter((segment): segment is string => typeof segment === "string")
+        .map((segment) => segment.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    : undefined;
 
   return {
     id,
     title,
+    ...(alias ? { alias } : {}),
     url,
     targetType,
     pageUid: resolvedPageUid || null,
     blockUid: resolvedBlockUid || null,
+    ...(breadcrumbs ? { breadcrumbs } : {}),
   };
 };
 
@@ -286,35 +286,6 @@ export const parseStoredBookmarks = ({
   return value
     .map((bookmark, index) => parseStoredBookmark({ value: bookmark, index }))
     .filter((bookmark): bookmark is QuickSwitcherBookmark => Boolean(bookmark));
-};
-
-export const parseStoredQuerySource = ({
-  value,
-}: {
-  value: unknown;
-}): QuickSwitcherQuerySource => {
-  if (!isRecord(value)) {
-    return DEFAULT_QUERY_SOURCE;
-  }
-
-  const queryRef = typeof value.queryRef === "string" ? value.queryRef : "";
-  const normalizedQueryRef = queryRef.trim();
-  return {
-    enabled: Boolean(normalizedQueryRef),
-    queryRef: normalizedQueryRef,
-  };
-};
-
-export const normalizeQuerySource = ({
-  querySource,
-}: {
-  querySource: QuickSwitcherQuerySource;
-}): QuickSwitcherQuerySource => {
-  const queryRef = querySource.queryRef.trim();
-  return {
-    enabled: Boolean(queryRef),
-    queryRef,
-  };
 };
 
 export const parseStoredCommandPaletteSettings = ({
@@ -355,7 +326,10 @@ export const getCommandPaletteCommandLabel = ({
 }: {
   bookmark: QuickSwitcherBookmark;
   settings: QuickSwitcherCommandPaletteSettings;
-}): string => `${settings.prefix}${bookmark.title}`;
+}): string =>
+  `${settings.prefix}${
+    bookmark.alias ? `${bookmark.alias} (${bookmark.title})` : bookmark.title
+  }`;
 
 export const extractBlockRefUid = ({
   value,
@@ -364,81 +338,6 @@ export const extractBlockRefUid = ({
 }): string | null => {
   const match = value.match(BLOCK_REF_REGEX);
   return match?.[1] || null;
-};
-
-export const extractQueryBlockLabel = ({
-  value,
-}: {
-  value: string;
-}): string | null => {
-  const match = value.trim().match(QUERY_BLOCK_REGEX);
-  const label = match?.[1]?.trim();
-  return label || null;
-};
-
-export const extractQueryBlockAlias = ({
-  value,
-}: {
-  value: string;
-}): string | null =>
-  value.match(QUERY_BLOCK_REFERENCE_REGEX)?.[1]?.trim() || null;
-
-const normalizeLookupValue = ({ value }: { value: string }): string =>
-  value.trim().toLowerCase();
-
-export const resolveActiveQuerySourceUid = ({
-  queryRef,
-  activeQueries,
-}: {
-  queryRef: string;
-  activeQueries: QueryBuilderSourceCandidate[];
-}): string | null => {
-  const normalizedQueryRef = queryRef.trim();
-  if (!normalizedQueryRef) {
-    return null;
-  }
-
-  const directUid =
-    extractBlockRefUid({ value: normalizedQueryRef }) || normalizedQueryRef;
-  if (activeQueries.some((query) => query.uid === directUid)) {
-    return directUid;
-  }
-
-  const queryBlockLabel = extractQueryBlockLabel({
-    value: normalizedQueryRef,
-  });
-  const lookupValues = new Set<string>([
-    normalizeLookupValue({ value: normalizedQueryRef }),
-  ]);
-  if (queryBlockLabel) {
-    lookupValues.add(normalizeLookupValue({ value: queryBlockLabel }));
-  }
-
-  return (
-    activeQueries.find((query) => {
-      const title = query.title?.trim() || "";
-      if (title) {
-        const normalizedTitle = normalizeLookupValue({ value: title });
-        if (lookupValues.has(normalizedTitle)) {
-          return true;
-        }
-        if (
-          [...lookupValues].some(
-            (lookupValue) => normalizedTitle === `queries/${lookupValue}`,
-          )
-        ) {
-          return true;
-        }
-      }
-
-      const alias = query.text
-        ? extractQueryBlockAlias({ value: query.text })
-        : null;
-      return alias
-        ? lookupValues.has(normalizeLookupValue({ value: alias }))
-        : false;
-    })?.uid || null
-  );
 };
 
 export const createBookmarkId = (): string =>

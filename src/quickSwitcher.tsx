@@ -1,36 +1,27 @@
 import React from "react";
 import ReactDOM from "react-dom";
 import { render as renderToast } from "roamjs-components/components/Toast";
-import getPageTitleByPageUid from "roamjs-components/queries/getPageTitleByPageUid";
 import type { OnloadArgs } from "roamjs-components/types/native";
-import type { Result as QueryBuilderResult } from "roamjs-components/types/query-builder";
 import QuickSwitcherDialog from "~/components/QuickSwitcherDialog";
 import type {
   QuickSwitcherBookmark,
   QuickSwitcherCommandPaletteSettings,
-  QuickSwitcherQuerySource,
+  QuickSwitcherDialogMode,
 } from "~/types/quickSwitcher";
 import {
-  buildRoamPageUrl,
   getBookmarkTargetLabel,
   getBookmarkTargetType,
   getBookmarkTargetUid,
   getCommandPaletteCommandLabel,
   normalizeCommandPaletteSettings,
-  normalizeQuerySource,
   parseStoredCommandPaletteSettings,
   parsePageUidFromUrl,
-  parseStoredQuerySource,
   parseStoredBookmarks,
-  resolveActiveQuerySourceUid,
   toAbsoluteUrl,
-  type QueryBuilderSourceCandidate,
 } from "~/utils/quickSwitcher";
 
 const BOOKMARKS_SETTING_KEY = "quickSwitcherBookmarks";
-const QUERY_SOURCE_SETTING_KEY = "quickSwitcherQuerySource";
 const COMMAND_PALETTE_SETTING_KEY = "quickSwitcherCommandPalette";
-export const QUERY_SOURCE_REF_SETTING_KEY = "quickSwitcherQuerySourceRef";
 export const COMMAND_PALETTE_ENABLED_SETTING_KEY =
   "quickSwitcherCommandPaletteEnabled";
 export const COMMAND_PALETTE_PREFIX_SETTING_KEY =
@@ -44,13 +35,11 @@ type ToastIntent = "none" | "primary" | "success" | "warning" | "danger";
 export type QuickSwitcherController = {
   getBookmarks: () => QuickSwitcherBookmark[];
   getCommandPaletteSettings: () => QuickSwitcherCommandPaletteSettings;
-  getQuerySource: () => QuickSwitcherQuerySource;
-  open: () => void;
+  open: ({ mode }?: { mode?: QuickSwitcherDialogMode }) => void;
   setBookmarks: (bookmarks: QuickSwitcherBookmark[]) => void;
   setCommandPaletteSettings: (
     settings: QuickSwitcherCommandPaletteSettings,
   ) => void;
-  setQuerySource: (querySource: QuickSwitcherQuerySource) => void;
   unload: () => void;
 };
 
@@ -148,10 +137,36 @@ const openBookmark = async ({
   }
 };
 
-const getBookmarkKey = ({ bookmark }: { bookmark: QuickSwitcherBookmark }) => {
+const openBookmarkInSidebar = async ({
+  bookmark,
+}: {
+  bookmark: QuickSwitcherBookmark;
+}): Promise<boolean> => {
   const targetType = getBookmarkTargetType({ bookmark });
   const targetUid = getBookmarkTargetUid({ bookmark });
-  return targetUid ? `${targetType}:${targetUid}` : `url:${bookmark.url}`;
+  if (!targetUid) {
+    showToast({
+      content: `Unable to open ${bookmark.title} in sidebar`,
+      intent: "danger",
+    });
+    return false;
+  }
+
+  try {
+    await window.roamAlphaAPI.ui.rightSidebar.addWindow({
+      window: {
+        type: targetType === "block" ? "block" : "outline",
+        "block-uid": targetUid,
+      },
+    });
+    return true;
+  } catch (error) {
+    showToast({
+      content: `Unable to open ${bookmark.title} in sidebar`,
+      intent: "danger",
+    });
+    return false;
+  }
 };
 
 const getUniqueCommandLabel = ({
@@ -178,193 +193,6 @@ const getUniqueCommandLabel = ({
     index += 1;
   }
   return `${typedLabel} ${index}`;
-};
-
-const mergeBookmarks = ({
-  savedBookmarks,
-  dynamicBookmarks,
-}: {
-  savedBookmarks: QuickSwitcherBookmark[];
-  dynamicBookmarks: QuickSwitcherBookmark[];
-}): QuickSwitcherBookmark[] => {
-  const seen = new Set<string>();
-  return [...savedBookmarks, ...dynamicBookmarks].filter((bookmark) => {
-    const key = getBookmarkKey({ bookmark });
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-};
-
-const getQueryBuilderApi = (): {
-  runQuery: (parentUid: string) => Promise<QueryBuilderResult[]>;
-  listActiveQueries: () => { uid: string }[];
-} | null => {
-  const queryBuilder = (
-    window as Window & {
-      roamjs?: {
-        extension?: {
-          queryBuilder?: {
-            runQuery?: (parentUid: string) => Promise<QueryBuilderResult[]>;
-            listActiveQueries?: () => { uid: string }[];
-          };
-        };
-      };
-    }
-  ).roamjs?.extension?.queryBuilder;
-  return queryBuilder?.runQuery && queryBuilder.listActiveQueries
-    ? {
-        runQuery: queryBuilder.runQuery,
-        listActiveQueries: queryBuilder.listActiveQueries,
-      }
-    : null;
-};
-
-const getActiveQueryUids = ({
-  queryBuilder,
-}: {
-  queryBuilder: { listActiveQueries: () => { uid: string }[] };
-}): string[] => {
-  try {
-    return [
-      ...new Set(
-        queryBuilder
-          .listActiveQueries()
-          .map((query) => query.uid)
-          .filter(Boolean),
-      ),
-    ];
-  } catch (error) {
-    return [];
-  }
-};
-
-const resolveActiveQueryMetadata = async ({
-  uid,
-}: {
-  uid: string;
-}): Promise<QueryBuilderSourceCandidate> => {
-  const pulled = (await window.roamAlphaAPI.data.async.pull(
-    "[:block/uid :block/string :node/title]",
-    [":block/uid", uid],
-  )) as {
-    ":block/uid"?: string;
-    ":block/string"?: string;
-    ":node/title"?: string;
-  } | null;
-  return {
-    uid: pulled?.[":block/uid"] || uid,
-    title: pulled?.[":node/title"] || "",
-    text: pulled?.[":block/string"] || "",
-  };
-};
-
-const resolveQueryBuilderUid = async ({
-  queryRef,
-  queryBuilder,
-}: {
-  queryRef: string;
-  queryBuilder: { listActiveQueries: () => { uid: string }[] };
-}): Promise<string> => {
-  const activeQueryUids = getActiveQueryUids({ queryBuilder });
-  if (!activeQueryUids.length) {
-    return "";
-  }
-
-  const uidOnlyMatch = resolveActiveQuerySourceUid({
-    queryRef,
-    activeQueries: activeQueryUids.map((uid) => ({ uid })),
-  });
-  if (uidOnlyMatch) {
-    return uidOnlyMatch;
-  }
-
-  const activeQueries = await Promise.all(
-    activeQueryUids.map((uid) =>
-      resolveActiveQueryMetadata({ uid }).catch(() => ({ uid })),
-    ),
-  );
-  return (
-    resolveActiveQuerySourceUid({
-      queryRef,
-      activeQueries,
-    }) || ""
-  );
-};
-
-const getResultUidCandidates = ({
-  result,
-}: {
-  result: QueryBuilderResult;
-}): string[] => {
-  const candidates = new Set<string>();
-  Object.entries(result).forEach(([key, value]) => {
-    if (typeof value !== "string") {
-      return;
-    }
-    const normalizedKey = key.toLowerCase();
-    if (normalizedKey === "uid" || normalizedKey.endsWith("-uid")) {
-      candidates.add(value);
-    }
-  });
-  return [...candidates];
-};
-
-const resolveQueryBuilderPageBookmarks = async ({
-  querySource,
-}: {
-  querySource: QuickSwitcherQuerySource;
-}): Promise<QuickSwitcherBookmark[]> => {
-  if (!querySource.enabled || !querySource.queryRef) {
-    return [];
-  }
-
-  const queryBuilder = getQueryBuilderApi();
-  if (!queryBuilder) {
-    return [];
-  }
-
-  const queryUid = await resolveQueryBuilderUid({
-    queryRef: querySource.queryRef,
-    queryBuilder,
-  });
-  if (!queryUid) {
-    return [];
-  }
-
-  const results = await queryBuilder.runQuery(queryUid);
-  const seenPageUids = new Set<string>();
-  return results.reduce<QuickSwitcherBookmark[]>((bookmarks, result) => {
-    const pageUid = getResultUidCandidates({ result }).find((uid) => {
-      if (seenPageUids.has(uid)) {
-        return false;
-      }
-      return Boolean(getPageTitleByPageUid(uid));
-    });
-    if (!pageUid) {
-      return bookmarks;
-    }
-
-    const title = getPageTitleByPageUid(pageUid);
-    const url = buildRoamPageUrl({ pageUid });
-    if (!title || !url) {
-      return bookmarks;
-    }
-
-    seenPageUids.add(pageUid);
-    bookmarks.push({
-      id: `query-builder-${pageUid}`,
-      title,
-      targetType: "page",
-      pageUid,
-      blockUid: null,
-      url,
-      source: "query-builder",
-    });
-    return bookmarks;
-  }, []);
 };
 
 const getBooleanSetting = ({
@@ -412,26 +240,13 @@ const initializeQuickSwitcher = ({
       }),
     },
   });
-  const storedQuerySource = parseStoredQuerySource({
-    value: extensionAPI.settings.get(QUERY_SOURCE_SETTING_KEY),
-  });
-  let querySource = normalizeQuerySource({
-    querySource: {
-      enabled: storedQuerySource.enabled,
-      queryRef: getStringSetting({
-        value: extensionAPI.settings.get(QUERY_SOURCE_REF_SETTING_KEY),
-        fallback: storedQuerySource.queryRef,
-      }),
-    },
-  });
-  let dynamicBookmarks: QuickSwitcherBookmark[] = [];
   let registeredBookmarkCommandLabels = new Set<string>();
   let bookmarkCommandSyncQueue = Promise.resolve();
   let bookmarkCommandSyncId = 0;
   let isDialogOpen = false;
+  let dialogMode: QuickSwitcherDialogMode = "open";
   let hasRenderedDialog = false;
   let isUnloaded = false;
-  let refreshQuerySourceId = 0;
 
   const persistBookmarks = (): void => {
     void extensionAPI.settings.set(BOOKMARKS_SETTING_KEY, bookmarks);
@@ -452,22 +267,17 @@ const initializeQuickSwitcher = ({
     );
   };
 
-  const persistQuerySource = (): void => {
-    void extensionAPI.settings.set(QUERY_SOURCE_SETTING_KEY, querySource);
-    void extensionAPI.settings.set(
-      QUERY_SOURCE_REF_SETTING_KEY,
-      querySource.queryRef,
-    );
-  };
-
-  const getMergedBookmarks = (): QuickSwitcherBookmark[] =>
-    mergeBookmarks({
-      savedBookmarks: bookmarks,
-      dynamicBookmarks,
-    });
-
   const closeDialog = (): void => {
     isDialogOpen = false;
+    if (hasRenderedDialog) {
+      render();
+    }
+  };
+
+  const setBookmarks = (nextBookmarks: QuickSwitcherBookmark[]): void => {
+    bookmarks = sanitizeBookmarks({ bookmarks: nextBookmarks });
+    persistBookmarks();
+    syncBookmarkCommands();
     if (hasRenderedDialog) {
       render();
     }
@@ -480,11 +290,20 @@ const initializeQuickSwitcher = ({
     hasRenderedDialog = true;
     ReactDOM.render(
       <QuickSwitcherDialog
-        bookmarks={getMergedBookmarks()}
+        bookmarks={bookmarks}
+        initialMode={dialogMode}
         isOpen={isDialogOpen}
         onClose={closeDialog}
+        onBookmarksChange={setBookmarks}
         onOpenBookmark={(bookmark): void => {
           void openBookmark({ bookmark }).then((didOpen) => {
+            if (didOpen) {
+              closeDialog();
+            }
+          });
+        }}
+        onOpenBookmarkInSidebar={(bookmark): void => {
+          void openBookmarkInSidebar({ bookmark }).then((didOpen) => {
             if (didOpen) {
               closeDialog();
             }
@@ -495,53 +314,21 @@ const initializeQuickSwitcher = ({
     );
   };
 
-  const refreshQuerySourceBookmarks = async (): Promise<void> => {
-    const refreshId = refreshQuerySourceId + 1;
-    refreshQuerySourceId = refreshId;
-    if (dynamicBookmarks.length) {
-      dynamicBookmarks = [];
-      if (hasRenderedDialog) {
-        render();
-      }
-    }
-    try {
-      const nextDynamicBookmarks = await resolveQueryBuilderPageBookmarks({
-        querySource,
-      });
-      if (refreshId !== refreshQuerySourceId || isUnloaded) {
-        return;
-      }
-      dynamicBookmarks = nextDynamicBookmarks;
-      if (hasRenderedDialog) {
-        render();
-      }
-    } catch (error) {
-      if (refreshId !== refreshQuerySourceId || isUnloaded) {
-        return;
-      }
-      dynamicBookmarks = [];
-      if (hasRenderedDialog) {
-        render();
-      }
-      showToast({
-        content: "Unable to load Query Builder pages",
-        intent: "warning",
-      });
-    }
-  };
-
-  const openDialog = (): void => {
+  const openDialog = ({
+    mode = "open",
+  }: {
+    mode?: QuickSwitcherDialogMode;
+  } = {}): void => {
+    dialogMode = mode;
     isDialogOpen = true;
-    dynamicBookmarks = [];
     render();
-    void refreshQuerySourceBookmarks();
   };
 
   const registerCommand = (): void => {
     void extensionAPI.ui.commandPalette
       .addCommand({
         label: OPEN_QUICK_SWITCHER_COMMAND,
-        callback: openDialog,
+        callback: () => openDialog(),
       })
       .catch(() => undefined);
   };
@@ -626,16 +413,8 @@ const initializeQuickSwitcher = ({
     getBookmarks: (): QuickSwitcherBookmark[] => bookmarks,
     getCommandPaletteSettings: (): QuickSwitcherCommandPaletteSettings =>
       commandPaletteSettings,
-    getQuerySource: (): QuickSwitcherQuerySource => querySource,
     open: openDialog,
-    setBookmarks: (nextBookmarks: QuickSwitcherBookmark[]): void => {
-      bookmarks = sanitizeBookmarks({ bookmarks: nextBookmarks });
-      persistBookmarks();
-      syncBookmarkCommands();
-      if (hasRenderedDialog) {
-        render();
-      }
-    },
+    setBookmarks,
     setCommandPaletteSettings: (
       nextCommandPaletteSettings: QuickSwitcherCommandPaletteSettings,
     ): void => {
@@ -645,14 +424,8 @@ const initializeQuickSwitcher = ({
       persistCommandPaletteSettings();
       syncBookmarkCommands();
     },
-    setQuerySource: (nextQuerySource: QuickSwitcherQuerySource): void => {
-      querySource = normalizeQuerySource({ querySource: nextQuerySource });
-      persistQuerySource();
-      void refreshQuerySourceBookmarks();
-    },
     unload: (): void => {
       isUnloaded = true;
-      refreshQuerySourceId += 1;
       bookmarkCommandSyncId += 1;
       closeDialog();
       syncBookmarkCommands();
