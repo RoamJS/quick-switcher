@@ -22,20 +22,42 @@ export type QuickSwitcherEntrySuggestion = {
 
 type PulledRoamBlock = Record<string, unknown>;
 
+type RoamSearchResult = Record<string, unknown>;
+
+type RoamSearchOptions = {
+  "hide-code-blocks": boolean;
+  limit: number;
+  pull: string;
+  "search-blocks": boolean;
+  "search-pages": boolean;
+  "search-str": string;
+};
+
+type RoamSearchApi = (
+  options: RoamSearchOptions,
+) => Promise<RoamSearchResult[]>;
+
 const MAX_PAGE_SUGGESTIONS = 8;
 const MAX_BLOCK_SUGGESTIONS = 8;
+const MAX_SEARCH_RESULTS = 50;
+const SEARCH_RESULT_PULL = "[:block/string :node/title :block/uid]";
 
 const toDatalogString = ({ value }: { value: string }): string =>
   JSON.stringify(value);
 
-const escapeRegex = ({ value }: { value: string }): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const getSearchRegex = ({ query }: { query: string }): string =>
-  `(?i)${escapeRegex({ value: query.trim() })}`;
-
 const isPulledRoamBlock = (value: unknown): value is PulledRoamBlock =>
   typeof value === "object" && value !== null;
+
+const getSearchResultValue = ({
+  key,
+  result,
+}: {
+  key: ":block/string" | ":block/uid" | ":node/title";
+  result: RoamSearchResult;
+}): string => {
+  const value = result[key];
+  return typeof value === "string" ? value : "";
+};
 
 const normalizeBreadcrumbSegment = ({ value }: { value: string }): string =>
   value.replace(/\s+/g, " ").trim();
@@ -217,29 +239,28 @@ const addBreadcrumbsToBlockSuggestions = async ({
 export const searchEntries = async ({
   query,
   savedTargetKeys,
+  searchApi,
 }: {
   query: string;
   savedTargetKeys: Set<string>;
+  searchApi?: RoamSearchApi;
 }): Promise<QuickSwitcherEntrySuggestion[]> => {
-  const regex = toDatalogString({ value: getSearchRegex({ query }) });
-  const [pageRows, blockRows] = await Promise.all([
-    window.roamAlphaAPI.data.backend.q(
-      `[:find ?uid ?title
-        :where
-        [?page :node/title ?title]
-        [?page :block/uid ?uid]
-        [[re-pattern ${regex}] ?regex]
-        [[re-find ?regex ?title]]]`,
-    ) as Promise<[string, string][]>,
-    window.roamAlphaAPI.data.backend.q(
-      `[:find ?uid ?text
-        :where
-        [?block :block/string ?text]
-        [?block :block/uid ?uid]
-        [[re-pattern ${regex}] ?regex]
-        [[re-find ?regex ?text]]]`,
-    ) as Promise<[string, string][]>,
-  ]);
+  const options: RoamSearchOptions = {
+    "hide-code-blocks": false,
+    limit: MAX_SEARCH_RESULTS,
+    pull: SEARCH_RESULT_PULL,
+    "search-blocks": true,
+    "search-pages": true,
+    "search-str": query.trim(),
+  };
+  const searchResults = searchApi
+    ? await searchApi(options)
+    : await (
+        window.roamAlphaAPI.data
+          .async as typeof window.roamAlphaAPI.data.async & {
+          search: RoamSearchApi;
+        }
+      ).search(options);
 
   const seen = new Set<string>();
   const addSuggestion = ({
@@ -261,40 +282,40 @@ export const searchEntries = async ({
     return true;
   };
 
-  const pages = pageRows
-    .map(([uid, title]) =>
-      toSuggestion({
-        uid,
-        title,
-        targetType: "page",
-      }),
-    )
-    .sort((a, b) => (a?.title || "").localeCompare(b?.title || ""));
-  const blocks = blockRows
-    .map(([uid, text]) =>
-      toSuggestion({
-        uid,
-        title: deriveBlockTitle({ text }),
-        targetType: "block",
-      }),
-    )
-    .sort((a, b) => (a?.title || "").localeCompare(b?.title || ""));
-
   const suggestions: QuickSwitcherEntrySuggestion[] = [];
   let pageSuggestionCount = 0;
-  pages.some((suggestion) => {
-    if (addSuggestion({ suggestion, result: suggestions })) {
-      pageSuggestionCount += 1;
-    }
-    return pageSuggestionCount >= MAX_PAGE_SUGGESTIONS;
-  });
   let blockSuggestionCount = 0;
-  blocks.some((suggestion) => {
-    if (addSuggestion({ suggestion, result: suggestions })) {
-      blockSuggestionCount += 1;
+
+  searchResults.some((result) => {
+    const uid = getSearchResultValue({ key: ":block/uid", result });
+    const pageTitle = getSearchResultValue({ key: ":node/title", result });
+    const blockText = getSearchResultValue({ key: ":block/string", result });
+    const targetType = pageTitle ? "page" : "block";
+    if (
+      (targetType === "page" && pageSuggestionCount >= MAX_PAGE_SUGGESTIONS) ||
+      (targetType === "block" && blockSuggestionCount >= MAX_BLOCK_SUGGESTIONS)
+    ) {
+      return false;
     }
-    return blockSuggestionCount >= MAX_BLOCK_SUGGESTIONS;
+
+    const suggestion = toSuggestion({
+      uid,
+      title: pageTitle || deriveBlockTitle({ text: blockText }),
+      targetType,
+    });
+    if (addSuggestion({ suggestion, result: suggestions })) {
+      if (targetType === "page") {
+        pageSuggestionCount += 1;
+      } else {
+        blockSuggestionCount += 1;
+      }
+    }
+    return (
+      pageSuggestionCount >= MAX_PAGE_SUGGESTIONS &&
+      blockSuggestionCount >= MAX_BLOCK_SUGGESTIONS
+    );
   });
+
   return addBreadcrumbsToBlockSuggestions({ suggestions });
 };
 

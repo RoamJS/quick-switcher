@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Made Manage search fast and current by using Roam's bounded frontend search and clearing stale suggestions as queries change.
+- Kept the first Escape press in Manage mode focused on clearing the current search.
+- Made selected rows theme-aware and replaced custom footer buttons with Blueprint controls.
 - Moved saved-entry add and remove workflows into a Manage tab in the Quick Switcher dialog.
 - Replaced saved-entry settings controls with a Manage Saved Entries button.
 - Restyled the Quick Switcher dialog to follow Roam's native search layout and colors.
