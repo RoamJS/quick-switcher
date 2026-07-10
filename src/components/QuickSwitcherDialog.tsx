@@ -83,12 +83,6 @@ const SEARCH_INPUT_STYLE: React.CSSProperties = {
   boxShadow: "none",
 };
 
-const SELECTED_ROW_STYLE: React.CSSProperties = {
-  backgroundColor: "#dce4eb",
-  borderRadius: 4,
-  color: "inherit",
-};
-
 const showToast = ({
   content,
   intent = "none",
@@ -165,16 +159,17 @@ const FooterActionButton = ({
   onClick,
   showEnter,
 }: FooterActionButtonProps): React.ReactElement => (
-  <button
-    className={`bp3-button bp3-minimal rm-find-or-create-footer__action${
-      disabled ? "bp3-disabled" : ""
-    }${className ? ` ${className}` : ""}`}
+  <Button
+    className={`rm-find-or-create-footer__action${
+      className ? ` ${className}` : ""
+    }`}
     disabled={disabled}
+    minimal
     onClick={onClick}
     type="button"
   >
     {renderFooterActionContent({ hotkeys, label, showEnter })}
-  </button>
+  </Button>
 );
 
 const QuickSwitcherDialog = ({
@@ -319,6 +314,7 @@ const QuickSwitcherDialog = ({
   useEffect((): void | (() => void) => {
     const requestId = searchRequestRef.current + 1;
     searchRequestRef.current = requestId;
+    setSuggestions([]);
     setSelectedSuggestionIndex(0);
 
     if (mode !== "manage" || normalizedEntryInput.length < 2) {
@@ -365,11 +361,22 @@ const QuickSwitcherDialog = ({
   );
 
   const clearEntryInput = useCallback((): void => {
+    searchRequestRef.current += 1;
     setEntryInput("");
     setSuggestions([]);
     setSelectedSuggestionIndex(0);
     setIsSearching(false);
   }, []);
+
+  const onManageEntryInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>): void => {
+      searchRequestRef.current += 1;
+      setEntryInput(event.target.value);
+      setSuggestions([]);
+      setSelectedSuggestionIndex(0);
+    },
+    [],
+  );
 
   const addSuggestion = useCallback(
     ({ suggestion }: { suggestion: QuickSwitcherEntrySuggestion }): boolean => {
@@ -620,6 +627,7 @@ const QuickSwitcherDialog = ({
       if (event.key === "Escape") {
         if (entryInput || suggestions.length) {
           event.preventDefault();
+          event.stopPropagation();
           clearEntryInput();
           return;
         }
@@ -681,7 +689,7 @@ const QuickSwitcherDialog = ({
           leftIcon="search"
           onChange={(event: React.ChangeEvent<HTMLInputElement>): void => {
             if (mode === "manage") {
-              setEntryInput(event.target.value);
+              onManageEntryInputChange(event);
               return;
             }
             setQuery(event.target.value);
@@ -831,10 +839,10 @@ const QuickSwitcherDialog = ({
       <Menu className="rm-find-or-create-modal-body__list">
         {visibleBookmarks.map((bookmark, index) => (
           <MenuItem
+            active={selectedIndex === index}
             key={bookmark.id}
             onClick={(event): void => onBookmarkRowClick({ bookmark, event })}
             onMouseEnter={(): void => setSelectedIndex(index)}
-            style={selectedIndex === index ? SELECTED_ROW_STYLE : undefined}
             multiline
             text={renderRowContent({
               breadcrumbs: getBookmarkBreadcrumbs({ bookmark }),
@@ -868,16 +876,12 @@ const QuickSwitcherDialog = ({
         <Menu className="rm-find-or-create-modal-body__list">
           {suggestions.map((suggestion, index) => (
             <MenuItem
+              active={selectedSuggestionIndex === index}
               key={getSuggestionTargetKey({ suggestion })}
               onClick={(): void => {
                 addSuggestion({ suggestion });
               }}
               onMouseEnter={(): void => setSelectedSuggestionIndex(index)}
-              style={
-                selectedSuggestionIndex === index
-                  ? SELECTED_ROW_STYLE
-                  : undefined
-              }
               text={renderRowContent({
                 breadcrumbs:
                   suggestion.targetType === "block"

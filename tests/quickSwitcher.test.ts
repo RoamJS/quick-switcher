@@ -16,6 +16,7 @@ import {
   createBookmarkFromSuggestion,
   getBlockBreadcrumbsFromPull,
   getSavedTargetKeys,
+  searchEntries,
 } from "../src/utils/quickSwitcherEntries";
 
 test("parses a page uid from roam page urls", () => {
@@ -147,6 +148,81 @@ test("builds saved target keys and bookmarks from entry suggestions", () => {
     breadcrumbs: ["Daily Notes", "Parent block"],
     url: "https://roamresearch.com/#/app/graph/page/new-block-uid",
   });
+});
+
+test("searches a bounded frontend result set and filters saved targets", async () => {
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        href: "https://roamresearch.com/#/app/test-graph/daily-notes",
+        origin: "https://roamresearch.com",
+      },
+      roamAlphaAPI: {
+        data: {
+          pull: (): null => null,
+        },
+      },
+    },
+    writable: true,
+  });
+
+  try {
+    let receivedOptions: Record<string, unknown> = {};
+    const pageResults = Array.from({ length: 10 }, (_, index) => ({
+      ":block/uid": `page-${index}`,
+      ":node/title": `Project page ${index}`,
+    }));
+    const blockResults = Array.from({ length: 10 }, (_, index) => ({
+      ":block/string": `Project block ${index}`,
+      ":block/uid": `block-${index}`,
+    }));
+
+    const suggestions = await searchEntries({
+      query: "  project  ",
+      savedTargetKeys: new Set(["page:page-0", "block:block-0"]),
+      searchApi: async (options) => {
+        receivedOptions = options;
+        return pageResults.flatMap((page, index) => [
+          page,
+          blockResults[index],
+        ]);
+      },
+    });
+
+    expect(receivedOptions).toEqual({
+      "hide-code-blocks": false,
+      limit: 50,
+      pull: "[:block/string :node/title :block/uid]",
+      "search-blocks": true,
+      "search-pages": true,
+      "search-str": "project",
+    });
+    expect(suggestions).toHaveLength(16);
+    expect(
+      suggestions.filter(({ targetType }) => targetType === "page"),
+    ).toHaveLength(8);
+    expect(
+      suggestions.filter(({ targetType }) => targetType === "block"),
+    ).toHaveLength(8);
+    expect(
+      suggestions.some(
+        ({ targetType, uid }) => `${targetType}:${uid}` === "page:page-0",
+      ),
+    ).toBe(false);
+    expect(
+      suggestions.some(
+        ({ targetType, uid }) => `${targetType}:${uid}` === "block:block-0",
+      ),
+    ).toBe(false);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+      writable: true,
+    });
+  }
 });
 
 test("extracts block breadcrumbs from pulled block parents", () => {
