@@ -153,12 +153,21 @@ const openBookmarkInSidebar = async ({
   }
 
   try {
-    await window.roamAlphaAPI.ui.rightSidebar.addWindow({
-      window: {
-        type: targetType === "block" ? "block" : "outline",
-        "block-uid": targetUid,
-      },
-    });
+    if (targetType === "block") {
+      await window.roamAlphaAPI.ui.rightSidebar.addWindow({
+        window: {
+          type: "block",
+          "block-uid": targetUid,
+        },
+      });
+    } else {
+      await window.roamAlphaAPI.ui.rightSidebar.addWindow({
+        window: {
+          type: "outline",
+          "page-uid": targetUid,
+        },
+      });
+    }
     return true;
   } catch (error) {
     showToast({
