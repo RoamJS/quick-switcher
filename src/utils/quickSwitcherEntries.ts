@@ -101,7 +101,7 @@ export const getSuggestionTargetKey = ({
   suggestion: QuickSwitcherEntrySuggestion;
 }): string => `${suggestion.targetType}:${suggestion.uid}`;
 
-export const getBookmarkTargetKey = ({
+const getBookmarkTargetKey = ({
   bookmark,
 }: {
   bookmark: QuickSwitcherBookmark;

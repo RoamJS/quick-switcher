@@ -7,6 +7,7 @@
 **Jump to saved Roam pages and blocks from a fast, searchable switcher with optional command palette shortcuts.**
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RoamJS/quick-switcher)
+[![Slack](https://img.shields.io/badge/Slack-%23roam--js-purple)](https://roamresearch.slack.com/archives/C016N2B66JU)
 
 ## Features
 

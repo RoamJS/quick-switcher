@@ -32,7 +32,7 @@ type ExtensionApi = OnloadArgs["extensionAPI"];
 
 type ToastIntent = "none" | "primary" | "success" | "warning" | "danger";
 
-export type QuickSwitcherController = {
+type QuickSwitcherController = {
   getBookmarks: () => QuickSwitcherBookmark[];
   getCommandPaletteSettings: () => QuickSwitcherCommandPaletteSettings;
   open: ({ mode }?: { mode?: QuickSwitcherDialogMode }) => void;

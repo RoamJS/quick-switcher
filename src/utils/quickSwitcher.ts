@@ -81,7 +81,7 @@ export const parsePageUidFromUrl = ({
   return parsePathForPageUid({ path: parsedUrl.pathname });
 };
 
-export const getCurrentRoamGraphName = (): string | null => {
+const getCurrentRoamGraphName = (): string | null => {
   if (typeof window === "undefined") {
     return null;
   }
@@ -124,31 +124,6 @@ export const buildRoamPageUrl = ({
   }
   const origin = getBaseOrigin();
   return `${origin}/#/app/${encodeURIComponent(resolvedGraphName)}/page/${encodeURIComponent(normalizedPageUid)}`;
-};
-
-const getLastSegmentFromPath = ({ path }: { path: string }): string => {
-  const segments = parsePathSegments({ path });
-  if (!segments.length) {
-    return "Untitled";
-  }
-  return decodeURIComponent(segments[segments.length - 1]);
-};
-
-export const derivePageTitleFromUrl = ({ url }: { url: string }): string => {
-  const pageUid = parsePageUidFromUrl({ url });
-  if (pageUid) {
-    return pageUid;
-  }
-  const absoluteUrl = toAbsoluteUrl({ url });
-  if (!absoluteUrl) {
-    return "Untitled";
-  }
-  const parsedUrl = new URL(absoluteUrl);
-  const hashPath = parseHashPath({ hash: parsedUrl.hash });
-  if (hashPath) {
-    return getLastSegmentFromPath({ path: hashPath });
-  }
-  return getLastSegmentFromPath({ path: parsedUrl.pathname });
 };
 
 export const getBookmarkTargetType = ({
