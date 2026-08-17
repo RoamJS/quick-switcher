@@ -3,11 +3,12 @@ import type {
   QuickSwitcherCommandPaletteSettings,
   QuickSwitcherTargetType,
 } from "~/types/quickSwitcher";
+import { BLOCK_REF_REGEX } from "roamjs-components/dom/constants";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]+)\)\)/;
+const ROAM_UID_REGEX = /^[\w-]{9,10}$/;
 export const DEFAULT_COMMAND_PALETTE_PREFIX = "QS: ";
 const LEGACY_COMMAND_PALETTE_PREFIX = "Q S - ";
 
@@ -313,6 +314,14 @@ export const extractBlockRefUid = ({
 }): string | null => {
   const match = value.match(BLOCK_REF_REGEX);
   return match?.[1] || null;
+};
+
+export const parseRoamUid = ({ value }: { value: string }): string | null => {
+  const normalizedValue = value.trim();
+  if (ROAM_UID_REGEX.test(normalizedValue)) {
+    return normalizedValue;
+  }
+  return extractBlockRefUid({ value: normalizedValue });
 };
 
 export const createBookmarkId = (): string =>

@@ -6,9 +6,9 @@ import {
   buildRoamPageUrl,
   createBookmarkId,
   deriveBlockTitle,
-  extractBlockRefUid,
   getBookmarkTargetType,
   getBookmarkTargetUid,
+  parseRoamUid,
   parsePageUidFromUrl,
 } from "~/utils/quickSwitcher";
 
@@ -87,10 +87,10 @@ const isPageUrlInput = ({ entry }: { entry: string }): boolean =>
 const getUidFromEntryInput = ({ value }: { value: string }): string => {
   const normalizedValue = value.trim();
   return (
-    extractBlockRefUid({ value: normalizedValue }) ||
+    parseRoamUid({ value: normalizedValue }) ||
     (isPageUrlInput({ entry: normalizedValue })
       ? parsePageUidFromUrl({ url: normalizedValue })
-      : normalizedValue) ||
+      : null) ||
     ""
   );
 };
@@ -245,6 +245,19 @@ export const searchEntries = async ({
   savedTargetKeys: Set<string>;
   searchApi?: RoamSearchApi;
 }): Promise<QuickSwitcherEntrySuggestion[]> => {
+  const directUid = getUidFromEntryInput({ value: query });
+  if (directUid) {
+    const directSuggestion = await resolveUidToSuggestion({ uid: directUid });
+    if (
+      directSuggestion &&
+      !savedTargetKeys.has(
+        getSuggestionTargetKey({ suggestion: directSuggestion }),
+      )
+    ) {
+      return [directSuggestion];
+    }
+  }
+
   const options: RoamSearchOptions = {
     "hide-code-blocks": false,
     limit: MAX_SEARCH_RESULTS,

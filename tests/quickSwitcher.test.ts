@@ -8,6 +8,7 @@ import {
   getCommandPaletteCommandLabel,
   normalizeCommandPaletteSettings,
   parsePageUidFromUrl,
+  parseRoamUid,
   parseStoredBookmarks,
   parseStoredCommandPaletteSettings,
   toAbsoluteUrl,
@@ -320,6 +321,59 @@ test("extracts block uids from roam block refs", () => {
     "abc123_DEF",
   );
   expect(extractBlockRefUid({ value: "not a block ref" })).toBeNull();
+});
+
+test("resolves raw and block reference uid searches directly", async () => {
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        href: "https://roamresearch.com/#/app/test-graph/daily-notes",
+        origin: "https://roamresearch.com",
+      },
+      roamAlphaAPI: {
+        data: {
+          backend: {
+            q: async (query: string): Promise<[string][]> =>
+              query.includes(":node/title") ? [["Direct UID page"]] : [],
+          },
+        },
+      },
+    },
+    writable: true,
+  });
+
+  try {
+    const searchApi = async (): Promise<never> => {
+      throw new Error("Text search should not run for a resolvable UID");
+    };
+
+    for (const query of ["acW-i9uMD", "((acW-i9uMD))"]) {
+      await expect(
+        searchEntries({ query, savedTargetKeys: new Set(), searchApi }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          targetType: "page",
+          title: "Direct UID page",
+          uid: "acW-i9uMD",
+        }),
+      ]);
+    }
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+      writable: true,
+    });
+  }
+});
+
+test("parses raw and block reference Roam uids", () => {
+  expect(parseRoamUid({ value: "acW-i9uMD" })).toBe("acW-i9uMD");
+  expect(parseRoamUid({ value: "((acW-i9uMD))" })).toBe("acW-i9uMD");
+  expect(parseRoamUid({ value: "a page title" })).toBeNull();
+  expect(parseRoamUid({ value: "short" })).toBeNull();
 });
 
 test("resolves relative urls to absolute urls", () => {
