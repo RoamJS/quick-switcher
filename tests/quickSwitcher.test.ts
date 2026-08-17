@@ -5,6 +5,7 @@ import {
   deriveBlockTitle,
   extractBlockRefUid,
   filterBookmarks,
+  getBookmarkRowPresentation,
   getCommandPaletteCommandLabel,
   normalizeCommandPaletteSettings,
   parsePageUidFromUrl,
@@ -57,6 +58,30 @@ test("filters bookmarks by title or url", () => {
   expect(filterBookmarks({ bookmarks, query: "lab" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "notes" })).toHaveLength(1);
   expect(filterBookmarks({ bookmarks, query: "graph/page" })).toHaveLength(2);
+});
+
+test("hides original titles only when a bookmark has an alias", () => {
+  const baseBookmark: QuickSwitcherBookmark = {
+    id: "block-1",
+    title: "Meeting Notes {{Today:SmartBlock:DevMeetingToday}}",
+    url: "https://roamresearch.com/#/app/graph/page/block-1",
+    targetType: "block",
+    pageUid: null,
+    blockUid: "block-1",
+    breadcrumbs: ["Sync", "Dev team"],
+  };
+
+  expect(getBookmarkRowPresentation({ bookmark: baseBookmark })).toEqual({
+    title: "Meeting Notes {{Today:SmartBlock:DevMeetingToday}}",
+  });
+  expect(
+    getBookmarkRowPresentation({
+      bookmark: { ...baseBookmark, alias: "Dev Team" },
+    }),
+  ).toEqual({
+    title: "Dev Team",
+    originalTitle: "Meeting Notes {{Today:SmartBlock:DevMeetingToday}}",
+  });
 });
 
 test("parses and sanitizes stored bookmarks", () => {
