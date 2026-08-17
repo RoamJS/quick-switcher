@@ -83,6 +83,11 @@ const SEARCH_INPUT_STYLE: React.CSSProperties = {
   boxShadow: "none",
 };
 
+const SELECTED_MENU_ITEM_STYLE: React.CSSProperties = {
+  backgroundColor: "rgba(115, 134, 148, 0.3)",
+  color: "#182026",
+};
+
 const showToast = ({
   content,
   intent = "none",
@@ -839,11 +844,14 @@ const QuickSwitcherDialog = ({
       <Menu className="rm-find-or-create-modal-body__list">
         {visibleBookmarks.map((bookmark, index) => (
           <MenuItem
-            active={selectedIndex === index}
+            aria-selected={selectedIndex === index}
             key={bookmark.id}
             onClick={(event): void => onBookmarkRowClick({ bookmark, event })}
             onMouseEnter={(): void => setSelectedIndex(index)}
             multiline
+            style={
+              selectedIndex === index ? SELECTED_MENU_ITEM_STYLE : undefined
+            }
             text={renderRowContent({
               breadcrumbs: getBookmarkBreadcrumbs({ bookmark }),
               subtitle: getBookmarkSubtitle({ bookmark }),
@@ -876,12 +884,17 @@ const QuickSwitcherDialog = ({
         <Menu className="rm-find-or-create-modal-body__list">
           {suggestions.map((suggestion, index) => (
             <MenuItem
-              active={selectedSuggestionIndex === index}
+              aria-selected={selectedSuggestionIndex === index}
               key={getSuggestionTargetKey({ suggestion })}
               onClick={(): void => {
                 addSuggestion({ suggestion });
               }}
               onMouseEnter={(): void => setSelectedSuggestionIndex(index)}
+              style={
+                selectedSuggestionIndex === index
+                  ? SELECTED_MENU_ITEM_STYLE
+                  : undefined
+              }
               text={renderRowContent({
                 breadcrumbs:
                   suggestion.targetType === "block"
