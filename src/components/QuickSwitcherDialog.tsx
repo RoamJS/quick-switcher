@@ -60,7 +60,6 @@ type FooterActionContentProps = {
 };
 
 type FooterActionButtonProps = FooterActionContentProps & {
-  className?: string;
   disabled?: boolean;
   onClick: () => void;
 };
@@ -83,9 +82,52 @@ const SEARCH_INPUT_STYLE: React.CSSProperties = {
   boxShadow: "none",
 };
 
+const MENU_ITEM_STYLE: React.CSSProperties = {
+  minHeight: 34,
+};
+
 const SELECTED_MENU_ITEM_STYLE: React.CSSProperties = {
+  ...MENU_ITEM_STYLE,
   backgroundColor: "rgba(115, 134, 148, 0.3)",
   color: "#182026",
+};
+
+const FOOTER_STYLE: React.CSSProperties = {
+  minHeight: 30,
+};
+
+const FOOTER_ACTION_CONTENT_STYLE: React.CSSProperties = {
+  alignItems: "center",
+  display: "inline-flex",
+  flexWrap: "nowrap",
+  whiteSpace: "nowrap",
+};
+
+const MODE_TABS_STYLE: React.CSSProperties = {
+  alignItems: "stretch",
+  display: "flex",
+  gap: 12,
+  padding: "0 16px",
+};
+
+const MODE_TAB_STYLE: React.CSSProperties = {
+  backgroundColor: "transparent",
+  borderBottomColor: "transparent",
+  borderBottomStyle: "solid",
+  borderBottomWidth: 3,
+  borderRadius: 0,
+  boxSizing: "border-box",
+  color: "#182026",
+  fontSize: 16,
+  marginBottom: -1,
+  minHeight: 48,
+  padding: "0 24px",
+};
+
+const ACTIVE_MODE_TAB_STYLE: React.CSSProperties = {
+  ...MODE_TAB_STYLE,
+  borderBottomColor: "#137cbd",
+  color: "#106ba3",
 };
 
 const showToast = ({
@@ -126,7 +168,7 @@ const renderFooterActionContent = ({
   hotkeys = [],
   showEnter = false,
 }: FooterActionContentProps): React.ReactElement => (
-  <>
+  <span style={FOOTER_ACTION_CONTENT_STYLE}>
     <span className="rm-find-or-create-footer__action-desc">{label}</span>
     {hotkeys.length ? (
       <span className="rm-find-or-create-footer__action-hotkey">
@@ -153,11 +195,10 @@ const renderFooterActionContent = ({
         size={9}
       />
     ) : null}
-  </>
+  </span>
 );
 
 const FooterActionButton = ({
-  className = "",
   disabled = false,
   hotkeys,
   label,
@@ -165,9 +206,7 @@ const FooterActionButton = ({
   showEnter,
 }: FooterActionButtonProps): React.ReactElement => (
   <Button
-    className={`rm-find-or-create-footer__action${
-      className ? ` ${className}` : ""
-    }`}
+    className="rm-find-or-create-footer__action"
     disabled={disabled}
     minimal
     onClick={onClick}
@@ -653,19 +692,20 @@ const QuickSwitcherDialog = ({
     option,
   }: {
     option: ModeOption;
-  }): React.ReactElement => (
-    <Button
-      active={mode === option.mode}
-      aria-selected={mode === option.mode}
-      className="rm-find-or-create-modal-chip"
-      icon={option.icon}
-      minimal
-      onClick={(): void => onModeChange(option.mode)}
-      role="tab"
-      small
-      text={option.label}
-    />
-  );
+  }): React.ReactElement => {
+    const isActive = mode === option.mode;
+    return (
+      <Button
+        aria-selected={isActive}
+        icon={option.icon}
+        minimal
+        onClick={(): void => onModeChange(option.mode)}
+        role="tab"
+        style={isActive ? ACTIVE_MODE_TAB_STYLE : MODE_TAB_STYLE}
+        text={option.label}
+      />
+    );
+  };
 
   const renderSearchRightElement = (): React.ReactElement => (
     <div className="rm-find-or-create-modal-header__right-actions flex items-center">
@@ -717,6 +757,7 @@ const QuickSwitcherDialog = ({
         aria-label="Quick Switcher mode"
         className="rm-find-or-create-modal-filters"
         role="tablist"
+        style={MODE_TABS_STYLE}
       >
         {MODE_OPTIONS.map((option) => (
           <React.Fragment key={option.mode}>
@@ -804,6 +845,7 @@ const QuickSwitcherDialog = ({
     >
       <InputGroup
         autoComplete="off"
+        autoFocus
         fill
         onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
           setAliasInput(event.target.value)
@@ -850,7 +892,9 @@ const QuickSwitcherDialog = ({
             onMouseEnter={(): void => setSelectedIndex(index)}
             multiline
             style={
-              selectedIndex === index ? SELECTED_MENU_ITEM_STYLE : undefined
+              selectedIndex === index
+                ? SELECTED_MENU_ITEM_STYLE
+                : MENU_ITEM_STYLE
             }
             text={renderRowContent({
               breadcrumbs: getBookmarkBreadcrumbs({ bookmark }),
@@ -893,7 +937,7 @@ const QuickSwitcherDialog = ({
               style={
                 selectedSuggestionIndex === index
                   ? SELECTED_MENU_ITEM_STYLE
-                  : undefined
+                  : MENU_ITEM_STYLE
               }
               text={renderRowContent({
                 breadcrumbs:
@@ -979,11 +1023,11 @@ const QuickSwitcherDialog = ({
               }
               multiline
               onClick={(event): void => {
+                event.preventDefault();
                 if (isEditingAlias) {
-                  event.preventDefault();
                   return;
                 }
-                onBookmarkRowClick({ bookmark, event });
+                startAliasEdit({ bookmark });
               }}
               text={
                 isEditingAlias
@@ -994,6 +1038,7 @@ const QuickSwitcherDialog = ({
                       title: getBookmarkDisplayTitle({ bookmark }),
                     })
               }
+              style={MENU_ITEM_STYLE}
             />
           );
         })}
@@ -1012,7 +1057,7 @@ const QuickSwitcherDialog = ({
     const primaryText = mode === "manage" ? "Add" : "Open";
 
     return (
-      <div className="rm-find-or-create-footer">
+      <div className="rm-find-or-create-footer" style={FOOTER_STYLE}>
         <div className="rm-find-or-create-footer__title" />
         <div className="rm-find-or-create-footer__actions">
           {mode === "open" ? (
@@ -1028,7 +1073,6 @@ const QuickSwitcherDialog = ({
             </>
           ) : null}
           <FooterActionButton
-            className="rm-find-or-create-footer__action--primary"
             disabled={mode === "open" && !visibleBookmarks.length}
             label={primaryText}
             onClick={(): void => {
