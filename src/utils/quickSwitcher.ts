@@ -152,6 +152,15 @@ export const getBookmarkTargetLabel = ({
 }): string =>
   getBookmarkTargetType({ bookmark }) === "block" ? "Block" : "Page";
 
+export const getBookmarkRowPresentation = ({
+  bookmark,
+}: {
+  bookmark: QuickSwitcherBookmark;
+}): { originalTitle?: string; title: string } => ({
+  title: bookmark.alias || bookmark.title,
+  ...(bookmark.alias ? { originalTitle: bookmark.title } : {}),
+});
+
 export const deriveBlockTitle = ({
   text,
   maxWords = 8,

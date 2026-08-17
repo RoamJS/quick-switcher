@@ -7,6 +7,7 @@ import {
   Menu,
   MenuItem,
   Spinner,
+  Tooltip,
 } from "@blueprintjs/core";
 import React, {
   useCallback,
@@ -22,6 +23,8 @@ import type {
 } from "~/types/quickSwitcher";
 import {
   filterBookmarks,
+  getBookmarkRowPresentation,
+  getBookmarkTargetLabel,
   getBookmarkTargetType,
   getBookmarkTargetUid,
 } from "~/utils/quickSwitcher";
@@ -150,18 +153,6 @@ const getModeFromTabId = ({
 }: {
   tabId: string | number;
 }): QuickSwitcherDialogMode => (tabId === "manage" ? "manage" : "open");
-
-const getBookmarkDisplayTitle = ({
-  bookmark,
-}: {
-  bookmark: QuickSwitcherBookmark;
-}): string => bookmark.alias || bookmark.title;
-
-const getBookmarkSubtitle = ({
-  bookmark,
-}: {
-  bookmark: QuickSwitcherBookmark;
-}): string | undefined => (bookmark.alias ? bookmark.title : undefined);
 
 const renderFooterActionContent = ({
   label,
@@ -804,11 +795,9 @@ const QuickSwitcherDialog = ({
 
   const renderRowContent = ({
     breadcrumbs = [],
-    subtitle,
     title,
   }: {
     breadcrumbs?: string[];
-    subtitle?: string;
     title: string;
   }): React.ReactElement => (
     <div
@@ -826,13 +815,45 @@ const QuickSwitcherDialog = ({
           }
         >
           <span>{title}</span>
-          {subtitle ? (
-            <div className="bp3-text-muted truncate text-xs">{subtitle}</div>
-          ) : null}
         </div>
       </div>
     </div>
   );
+
+  const renderOriginalTitleButton = ({
+    bookmark,
+  }: {
+    bookmark: QuickSwitcherBookmark;
+  }): React.ReactElement | null => {
+    const { originalTitle } = getBookmarkRowPresentation({ bookmark });
+    if (!originalTitle) {
+      return null;
+    }
+
+    const targetLabel = getBookmarkTargetLabel({ bookmark }).toLowerCase();
+    return (
+      <Tooltip
+        content={
+          <div className="max-w-sm">
+            <div className="mb-1 font-semibold">Original {targetLabel}</div>
+            <div className="break-words">{originalTitle}</div>
+          </div>
+        }
+        hoverOpenDelay={250}
+      >
+        <Button
+          aria-label={`Show original ${targetLabel}: ${originalTitle}`}
+          icon="eye-open"
+          minimal
+          onClick={(event): void => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          small
+        />
+      </Tooltip>
+    );
+  };
 
   const renderAliasEditor = ({
     bookmark,
@@ -884,25 +905,29 @@ const QuickSwitcherDialog = ({
 
     return (
       <Menu className="rm-find-or-create-modal-body__list">
-        {visibleBookmarks.map((bookmark, index) => (
-          <MenuItem
-            aria-selected={selectedIndex === index}
-            key={bookmark.id}
-            onClick={(event): void => onBookmarkRowClick({ bookmark, event })}
-            onMouseEnter={(): void => setSelectedIndex(index)}
-            multiline
-            style={
-              selectedIndex === index
-                ? SELECTED_MENU_ITEM_STYLE
-                : MENU_ITEM_STYLE
-            }
-            text={renderRowContent({
-              breadcrumbs: getBookmarkBreadcrumbs({ bookmark }),
-              subtitle: getBookmarkSubtitle({ bookmark }),
-              title: getBookmarkDisplayTitle({ bookmark }),
-            })}
-          />
-        ))}
+        {visibleBookmarks.map((bookmark, index) => {
+          const isSelected = selectedIndex === index;
+          const { title } = getBookmarkRowPresentation({ bookmark });
+          return (
+            <MenuItem
+              aria-selected={isSelected}
+              key={bookmark.id}
+              labelElement={
+                isSelected ? renderOriginalTitleButton({ bookmark }) : null
+              }
+              onClick={(event): void =>
+                onBookmarkRowClick({ bookmark, event })
+              }
+              onMouseEnter={(): void => setSelectedIndex(index)}
+              multiline
+              style={isSelected ? SELECTED_MENU_ITEM_STYLE : MENU_ITEM_STYLE}
+              text={renderRowContent({
+                breadcrumbs: getBookmarkBreadcrumbs({ bookmark }),
+                title,
+              })}
+            />
+          );
+        })}
       </Menu>
     );
   };
@@ -964,6 +989,7 @@ const QuickSwitcherDialog = ({
       <Menu className="rm-find-or-create-modal-body__list">
         {bookmarks.map((bookmark) => {
           const isEditingAlias = editingAliasBookmarkId === bookmark.id;
+          const { title } = getBookmarkRowPresentation({ bookmark });
           return (
             <MenuItem
               key={bookmark.id}
@@ -996,6 +1022,7 @@ const QuickSwitcherDialog = ({
                   </div>
                 ) : (
                   <div className="flex items-center gap-1">
+                    {renderOriginalTitleButton({ bookmark })}
                     <Button
                       aria-label={`Edit alias for ${bookmark.title}`}
                       icon="edit"
@@ -1034,8 +1061,7 @@ const QuickSwitcherDialog = ({
                   ? renderAliasEditor({ bookmark })
                   : renderRowContent({
                       breadcrumbs: getBookmarkBreadcrumbs({ bookmark }),
-                      subtitle: getBookmarkSubtitle({ bookmark }),
-                      title: getBookmarkDisplayTitle({ bookmark }),
+                      title,
                     })
               }
               style={MENU_ITEM_STYLE}
