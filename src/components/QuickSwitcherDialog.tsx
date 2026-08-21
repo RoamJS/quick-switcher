@@ -950,7 +950,7 @@ const QuickSwitcherDialog = ({
         <div className="bp3-text-muted px-3 pb-1 pt-2 text-xs font-semibold">
           Add to saved entries
         </div>
-        <Menu className="rm-find-or-create-modal-body__list">
+        <Menu className="rm-find-or-create-modal-body__list mx-2 mb-2 rounded border border-[#c5cbd3]">
           {suggestions.map((suggestion, index) => (
             <MenuItem
               aria-selected={selectedSuggestionIndex === index}
