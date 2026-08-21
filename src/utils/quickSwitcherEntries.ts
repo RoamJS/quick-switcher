@@ -90,9 +90,15 @@ const getUidFromEntryInput = ({ value }: { value: string }): string => {
     extractBlockRefUid({ value: normalizedValue }) ||
     (isPageUrlInput({ entry: normalizedValue })
       ? parsePageUidFromUrl({ url: normalizedValue })
-      : normalizedValue) ||
+      : "") ||
     ""
   );
+};
+
+const getUidFromExactBlockRef = ({ value }: { value: string }): string => {
+  const normalizedValue = value.trim();
+  const uid = extractBlockRefUid({ value: normalizedValue });
+  return uid && normalizedValue === `((${uid}))` ? uid : "";
 };
 
 export const getSuggestionTargetKey = ({
@@ -245,6 +251,25 @@ export const searchEntries = async ({
   savedTargetKeys: Set<string>;
   searchApi?: RoamSearchApi;
 }): Promise<QuickSwitcherEntrySuggestion[]> => {
+  const referencedUid = getUidFromExactBlockRef({ value: query });
+  if (referencedUid) {
+    try {
+      const referencedSuggestion = await resolveUidToSuggestion({
+        uid: referencedUid,
+      });
+      if (
+        referencedSuggestion &&
+        !savedTargetKeys.has(
+          getSuggestionTargetKey({ suggestion: referencedSuggestion }),
+        )
+      ) {
+        return [referencedSuggestion];
+      }
+    } catch {
+      // Fall through to the existing text search when direct resolution fails.
+    }
+  }
+
   const options: RoamSearchOptions = {
     "hide-code-blocks": false,
     limit: MAX_SEARCH_RESULTS,

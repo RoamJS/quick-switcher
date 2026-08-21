@@ -3,11 +3,11 @@ import type {
   QuickSwitcherCommandPaletteSettings,
   QuickSwitcherTargetType,
 } from "~/types/quickSwitcher";
+import { BLOCK_REF_REGEX } from "roamjs-components/dom/constants";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]+)\)\)/;
 export const DEFAULT_COMMAND_PALETTE_PREFIX = "QS: ";
 const LEGACY_COMMAND_PALETTE_PREFIX = "Q S - ";
 

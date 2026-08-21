@@ -17,6 +17,7 @@ import {
   createBookmarkFromSuggestion,
   getBlockBreadcrumbsFromPull,
   getSavedTargetKeys,
+  resolveEntryInput,
   searchEntries,
 } from "../src/utils/quickSwitcherEntries";
 
@@ -241,6 +242,222 @@ test("searches a bounded frontend result set and filters saved targets", async (
         ({ targetType, uid }) => `${targetType}:${uid}` === "block:block-0",
       ),
     ).toBe(false);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+      writable: true,
+    });
+  }
+});
+
+test("resolves an exact block reference to an unsaved Manage search result", async () => {
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        href: "https://roamresearch.com/#/app/test-graph/daily-notes",
+        origin: "https://roamresearch.com",
+      },
+      roamAlphaAPI: {
+        data: {
+          backend: {
+            q: async (query: string): Promise<[string][]> =>
+              query.includes("?page :node/title ?title")
+                ? [["Resolved project page"]]
+                : [],
+          },
+          pull: (): null => null,
+        },
+      },
+    },
+    writable: true,
+  });
+
+  try {
+    let textSearchCalled = false;
+    const suggestions = await searchEntries({
+      query: "  ((acW-i9uMD))  ",
+      savedTargetKeys: new Set(),
+      searchApi: async () => {
+        textSearchCalled = true;
+        return [];
+      },
+    });
+
+    expect(textSearchCalled).toBe(false);
+    expect(suggestions).toEqual([
+      {
+        uid: "acW-i9uMD",
+        title: "Resolved project page",
+        targetType: "page",
+        url: "https://roamresearch.com/#/app/test-graph/page/acW-i9uMD",
+      },
+    ]);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+      writable: true,
+    });
+  }
+});
+
+test("resolves an exact block reference to an unsaved block result", async () => {
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        href: "https://roamresearch.com/#/app/test-graph/daily-notes",
+        origin: "https://roamresearch.com",
+      },
+      roamAlphaAPI: {
+        data: {
+          backend: {
+            q: async (query: string): Promise<[string][]> =>
+              query.includes("?block :block/string ?text")
+                ? [["Follow up with the project team tomorrow"]]
+                : [],
+          },
+          pull: (): Record<string, unknown> => ({
+            ":block/page": { ":node/title": "Projects" },
+          }),
+        },
+      },
+    },
+    writable: true,
+  });
+
+  try {
+    const suggestions = await searchEntries({
+      query: "((acW-i9uMD))",
+      savedTargetKeys: new Set(),
+      searchApi: async () => {
+        throw new Error("Text search should not run for a resolved block ref");
+      },
+    });
+
+    expect(suggestions).toEqual([
+      {
+        breadcrumbs: ["Projects"],
+        uid: "acW-i9uMD",
+        title: "Follow up with the project team tomorrow",
+        targetType: "block",
+        url: "https://roamresearch.com/#/app/test-graph/page/acW-i9uMD",
+      },
+    ]);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+      writable: true,
+    });
+  }
+});
+
+test("preserves Manage text search for saved, unresolved, invalid, and bare UID inputs", async () => {
+  const originalWindow = globalThis.window;
+  let uidResolutionQueries = 0;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        href: "https://roamresearch.com/#/app/test-graph/daily-notes",
+        origin: "https://roamresearch.com",
+      },
+      roamAlphaAPI: {
+        data: {
+          backend: {
+            q: async (query: string): Promise<[string][]> => {
+              uidResolutionQueries += 1;
+              if (
+                query.includes('"savedUid1"') &&
+                query.includes("?page :node/title ?title")
+              ) {
+                return [["Saved page"]];
+              }
+              return [];
+            },
+          },
+          pull: (): null => null,
+        },
+      },
+    },
+    writable: true,
+  });
+
+  try {
+    let textSearches = 0;
+    const searchApi = async (): Promise<Record<string, unknown>[]> => {
+      textSearches += 1;
+      return [];
+    };
+    const savedSuggestions = await searchEntries({
+      query: "((savedUid1))",
+      savedTargetKeys: new Set(["page:savedUid1"]),
+      searchApi,
+    });
+    expect(savedSuggestions).toEqual([]);
+
+    await searchEntries({
+      query: "((missing01))",
+      savedTargetKeys: new Set(),
+      searchApi,
+    });
+    const queriesAfterUnresolvedRef = uidResolutionQueries;
+    await searchEntries({
+      query: "((short))",
+      savedTargetKeys: new Set(),
+      searchApi,
+    });
+    await searchEntries({
+      query: "acW-i9uMD",
+      savedTargetKeys: new Set(),
+      searchApi,
+    });
+
+    expect(textSearches).toBe(4);
+    expect(uidResolutionQueries).toBe(queriesAfterUnresolvedRef);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+      writable: true,
+    });
+  }
+});
+
+test("does not resolve a bare UID through the entry input UID path", async () => {
+  const originalWindow = globalThis.window;
+  const queries: string[] = [];
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        href: "https://roamresearch.com/#/app/test-graph/daily-notes",
+        origin: "https://roamresearch.com",
+      },
+      roamAlphaAPI: {
+        data: {
+          backend: {
+            q: async (query: string): Promise<[string][]> => {
+              queries.push(query);
+              return [];
+            },
+          },
+          pull: (): null => null,
+        },
+      },
+    },
+    writable: true,
+  });
+
+  try {
+    expect(await resolveEntryInput({ value: "acW-i9uMD" })).toBeNull();
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain('?page :node/title "acW-i9uMD"');
   } finally {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
